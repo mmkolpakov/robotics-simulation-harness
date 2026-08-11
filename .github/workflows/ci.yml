@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           repository: mmkolpakov/robotics-runtime-contracts
-          ref: cd3096fb32c35067b774f0e442da2acd47908b25
+          ref: 903a4eea7a1c468f48d8d1621fc0443b3e1f497c
           persist-credentials: false
           path: robotics-runtime-contracts
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
@@ -93,7 +93,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           repository: mmkolpakov/robotics-runtime-contracts
-          ref: cd3096fb32c35067b774f0e442da2acd47908b25
+          ref: 903a4eea7a1c468f48d8d1621fc0443b3e1f497c
           persist-credentials: false
           path: robotics-runtime-contracts
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
