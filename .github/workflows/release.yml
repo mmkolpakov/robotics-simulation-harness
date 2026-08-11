@@ -14,6 +14,10 @@ defaults:
     shell: bash
     working-directory: robotics-acceptance-harness
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -29,7 +33,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           repository: mmkolpakov/robotics-runtime-contracts
-          ref: cd3096fb32c35067b774f0e442da2acd47908b25
+          ref: 12d993e292b28e03380188414665aac07626616e
           persist-credentials: false
           path: robotics-runtime-contracts
       - name: Verify tag belongs to main
@@ -66,7 +70,10 @@ jobs:
             --robotics-scenario tests/fixtures/simulation/scenario.yaml \
             --robotics-runtime tests/fixtures/simulation/runtime.yaml
       - name: Build distributions
-        run: uv build --no-sources --out-dir dist
+        run: |
+          SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          export SOURCE_DATE_EPOCH
+          uv build --no-sources --out-dir dist
       - name: Verify built wheel
         run: |
           set -euo pipefail
@@ -120,12 +127,42 @@ jobs:
         with:
           name: python-distributions
           path: robotics-acceptance-harness/dist/
+      - name: Detect an existing release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --json tagName >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Attest distributions
+        if: steps.release.outputs.exists != 'true'
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763  # v4.1.1
         with:
           subject-path: robotics-acceptance-harness/dist/*
       - name: Publish GitHub release
+        if: steps.release.outputs.exists != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes --verify-tag
+      - name: Verify immutable release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          for attempt in {1..12}; do
+            if gh release verify "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+              break
+            fi
+            if (( attempt < 12 )); then
+              sleep 5
+            fi
+          done
+          gh release verify "$GITHUB_REF_NAME"
+          for artifact in dist/*; do
+            gh release verify-asset "$GITHUB_REF_NAME" "$artifact"
+          done
