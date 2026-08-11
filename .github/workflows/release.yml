@@ -33,7 +33,7 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           repository: mmkolpakov/robotics-runtime-contracts
-          ref: 903a4eea7a1c468f48d8d1621fc0443b3e1f497c
+          ref: 12d993e292b28e03380188414665aac07626616e
           persist-credentials: false
           path: robotics-runtime-contracts
       - name: Verify tag belongs to main
@@ -70,7 +70,9 @@ jobs:
             --robotics-scenario tests/fixtures/simulation/scenario.yaml \
             --robotics-runtime tests/fixtures/simulation/runtime.yaml
       - name: Build distributions
-        run: uv build --no-sources --out-dir dist
+        run: |
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          uv build --no-sources --out-dir dist
       - name: Verify built wheel
         run: |
           set -euo pipefail

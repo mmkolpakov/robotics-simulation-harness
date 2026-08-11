@@ -587,7 +587,7 @@ dev = [
 
 [[package]]
 name = "robotics-runtime-contracts"
-version = "0.15.2"
+version = "0.15.3"
 source = { editable = "../robotics-runtime-contracts" }
 dependencies = [
     { name = "json-merge-patch" },

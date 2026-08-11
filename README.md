@@ -80,11 +80,11 @@ this package alone does not qualify a target.
 
 ## Install
 
-Install the attested `v0.17.0` release with its exact contracts baseline:
+Install the attested `v0.17.1` release with its exact contracts baseline:
 
 ```bash
-CONTRACTS=https://github.com/mmkolpakov/robotics-runtime-contracts/releases/download/v0.15.2/robotics_runtime_contracts-0.15.2-py3-none-any.whl
-HARNESS=https://github.com/mmkolpakov/robotics-acceptance-harness/releases/download/v0.17.0/robotics_acceptance_harness-0.17.0-py3-none-any.whl
+CONTRACTS=https://github.com/mmkolpakov/robotics-runtime-contracts/releases/download/v0.15.3/robotics_runtime_contracts-0.15.3-py3-none-any.whl
+HARNESS=https://github.com/mmkolpakov/robotics-acceptance-harness/releases/download/v0.17.1/robotics_acceptance_harness-0.17.1-py3-none-any.whl
 uv tool install \
   --with "${CONTRACTS}" \
   "${HARNESS}"
