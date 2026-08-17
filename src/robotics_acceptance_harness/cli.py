@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections import Counter
 from collections.abc import Mapping, Sequence
+from dataclasses import asdict
 from pathlib import Path
 
 from robotics_acceptance_harness import __version__
@@ -23,9 +25,18 @@ from robotics_acceptance_harness.diagnostics import (
     why_report,
     write_error_diagnostic,
 )
-from robotics_acceptance_harness.documents import DocumentBundle, load_bundle
+from robotics_acceptance_harness.documents import DocumentBundle, load_bundle, load_document
+from robotics_acceptance_harness.evidence import load_evidence_index
 from robotics_acceptance_harness.extension_schemas import load_extension_schemas
-from robotics_acceptance_harness.run_context import create_run_context
+from robotics_acceptance_harness.hardware_timing import evaluate_hardware_timing
+from robotics_acceptance_harness.metrics import MetricSample
+from robotics_acceptance_harness.otel import (
+    OTLP_JSON_LINES_MEDIA_TYPE,
+    load_otlp_json_metrics,
+    select_metric_points,
+)
+from robotics_acceptance_harness.receipts import VerifiedReceiptSet, load_verified_receipts
+from robotics_acceptance_harness.run_context import create_run_context, load_run_context
 
 
 def _add_extension_schema_argument(parser: argparse.ArgumentParser) -> None:
@@ -45,7 +56,26 @@ def _add_bundle_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--dataset", metavar="PATH")
     parser.add_argument("--permit", metavar="PATH")
     parser.add_argument("--verification", metavar="PATH")
+    parser.add_argument("--evaluator-receipt", action="append", default=[], metavar="PATH")
+    parser.add_argument("--evaluator-verification", action="append", default=[], metavar="PATH")
+    parser.add_argument(
+        "--evaluator-receipt-dependency",
+        action="append",
+        default=[],
+        metavar="PATH",
+    )
     _add_extension_schema_argument(parser)
+
+
+def _add_evidence_receipt_arguments(
+    parser: argparse.ArgumentParser,
+    *,
+    grouped: bool = False,
+) -> None:
+    metavar = "DOMAIN=PATH" if grouped else "PATH"
+    parser.add_argument("--artifact-receipt", action="append", default=[], metavar=metavar)
+    parser.add_argument("--artifact-verification", action="append", default=[], metavar=metavar)
+    parser.add_argument("--receipt-dependency", action="append", default=[], metavar=metavar)
 
 
 def _add_trace_arguments(parser: argparse.ArgumentParser) -> None:
@@ -75,8 +105,9 @@ def _add_trace_arguments(parser: argparse.ArgumentParser) -> None:
         action="append",
         required=True,
         metavar="PATH",
-        help="Zenoh channel contract in causal order; may be repeated.",
+        help="Transport channel contract in causal order; may be repeated.",
     )
+    _add_evidence_receipt_arguments(parser, grouped=True)
     parser.add_argument("--observation-output", required=True, metavar="DIR")
     parser.add_argument("--output", required=True, metavar="PATH")
 
@@ -120,6 +151,7 @@ def _parser() -> argparse.ArgumentParser:
         help="Validated acceptance-run.v1 context.",
     )
     verify.add_argument("--evidence-index", required=True, metavar="PATH")
+    _add_evidence_receipt_arguments(verify)
     verify.add_argument(
         "--otel-metrics",
         required=True,
@@ -144,6 +176,7 @@ def _parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--domain-id", required=True, metavar="DOMAIN_ID")
     evaluate.add_argument("--run-context", required=True, metavar="PATH")
     evaluate.add_argument("--evidence-index", required=True, metavar="PATH")
+    _add_evidence_receipt_arguments(evaluate)
     evaluate.add_argument("--otel-metrics", required=True, metavar="PATH")
     evaluate.add_argument("--window-start-ns", required=True, type=int)
     evaluate.add_argument("--window-end-ns", required=True, type=int)
@@ -201,10 +234,43 @@ def _parser() -> argparse.ArgumentParser:
     doctor.add_argument("--mode", choices=("live", "offline"), default="offline")
     doctor.add_argument("--evidence-dir", metavar="PATH")
     doctor.add_argument("--measurement-complete", metavar="PATH")
+    doctor.add_argument("--scenario", metavar="PATH")
+    doctor.add_argument("--evaluator-receipt", action="append", default=[], metavar="PATH")
+    doctor.add_argument("--evaluator-verification", action="append", default=[], metavar="PATH")
+    doctor.add_argument(
+        "--evaluator-receipt-dependency",
+        action="append",
+        default=[],
+        metavar="PATH",
+    )
 
     why = subparsers.add_parser("why", help="Explain an acceptance result verdict.")
     why.add_argument("result", metavar="PATH")
     why.add_argument("--format", choices=("json", "markdown"), default="json")
+
+    timing = subparsers.add_parser(
+        "timing-check",
+        help="Evaluate verified hardware-clock evidence against its scenario policy.",
+    )
+    timing.add_argument("--scenario", required=True, metavar="PATH")
+    timing.add_argument("--run-context", required=True, metavar="PATH")
+    timing.add_argument("--run-id", required=True, metavar="RUN_ID")
+    timing.add_argument("--domain-id", required=True, metavar="DOMAIN_ID")
+    timing.add_argument("--evidence-index", required=True, metavar="PATH")
+    timing.add_argument("--otel-metrics", required=True, metavar="PATH")
+    _add_evidence_receipt_arguments(timing)
+    timing.add_argument(
+        "--expect",
+        choices=("within-policy", "out-of-policy"),
+        default="within-policy",
+    )
+    _add_extension_schema_argument(timing)
+
+    otel_summary = subparsers.add_parser(
+        "otel-summary",
+        help="Summarize normalized OTLP metric points without evaluating them.",
+    )
+    otel_summary.add_argument("--otel-metrics", required=True, metavar="PATH")
 
     return parser
 
@@ -221,6 +287,16 @@ def _keyed_values(values: Sequence[str], option: str) -> Mapping[str, str]:
     return parsed
 
 
+def _grouped_values(values: Sequence[str], option: str) -> Mapping[str, tuple[str, ...]]:
+    parsed: dict[str, list[str]] = {}
+    for value in values:
+        key, separator, item = value.partition("=")
+        if not separator or not key or not item:
+            raise ValueError(f"invalid {option} value: {value!r}")
+        parsed.setdefault(key, []).append(item)
+    return {key: tuple(items) for key, items in parsed.items()}
+
+
 def _bundle(arguments: argparse.Namespace) -> DocumentBundle:
     return load_bundle(
         arguments.scenario,
@@ -230,6 +306,14 @@ def _bundle(arguments: argparse.Namespace) -> DocumentBundle:
         permit_path=arguments.permit,
         verification_path=arguments.verification,
         extension_schemas=load_extension_schemas(arguments.extension_schema),
+    )
+
+
+def _evaluator_receipts(arguments: argparse.Namespace) -> VerifiedReceiptSet:
+    return load_verified_receipts(
+        receipt_paths=arguments.evaluator_receipt,
+        verification_paths=arguments.evaluator_verification,
+        dependency_paths=arguments.evaluator_receipt_dependency,
     )
 
 
@@ -256,10 +340,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if arguments.command == "doctor":
+            requirements = ()
+            if arguments.scenario is not None:
+                scenario = load_document(arguments.scenario, expected_role="acceptance_scenario")
+                requirements = scenario.data["evaluator_requirements"]
             report = doctor_report(
                 mode=arguments.mode,
                 evidence_dir=arguments.evidence_dir,
                 measurement_complete=arguments.measurement_complete,
+                evaluator_requirements=requirements,
+                evaluator_receipts=_evaluator_receipts(arguments),
             )
             print(
                 report_markdown(report)
@@ -276,6 +366,63 @@ def main(argv: Sequence[str] | None = None) -> int:
                 else json.dumps(report, indent=2, sort_keys=True, allow_nan=False)
             )
             return 0
+
+        if arguments.command == "otel-summary":
+            samples = load_otlp_json_metrics(arguments.otel_metrics)
+            print(
+                json.dumps(
+                    {
+                        "sample_count": len(samples),
+                        "instruments": dict(sorted(Counter(item.name for item in samples).items())),
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0
+
+        if arguments.command == "timing-check":
+            scenario = load_document(
+                arguments.scenario,
+                expected_role="acceptance_scenario",
+                extension_schemas=load_extension_schemas(arguments.extension_schema),
+            )
+            load_run_context(
+                arguments.run_context,
+                run_id=arguments.run_id,
+                domain_id=arguments.domain_id,
+                scenario_id=str(scenario.data["scenario_id"]),
+                scenario_sha256=scenario.sha256,
+            )
+            evidence = load_evidence_index(
+                arguments.evidence_index,
+                expected_run_id=arguments.run_id,
+                receipt_paths=arguments.artifact_receipt,
+                verification_paths=arguments.artifact_verification,
+                receipt_dependency_paths=arguments.receipt_dependency,
+            )
+            metrics_path = Path(arguments.otel_metrics).expanduser().resolve()
+            metric_link = evidence.local_files.get(metrics_path)
+            if metric_link is None or metric_link["media_type"] != OTLP_JSON_LINES_MEDIA_TYPE:
+                raise ValueError(
+                    f"OTLP metrics are not verified local {OTLP_JSON_LINES_MEDIA_TYPE} evidence"
+                )
+            samples = select_metric_points(
+                load_otlp_json_metrics(
+                    metrics_path,
+                    expected_sha256=str(metric_link["sha256"]),
+                ),
+                run_id=arguments.run_id,
+                domain_id=arguments.domain_id,
+            )
+            observation = evaluate_hardware_timing(
+                scenario.data["time_policy"],
+                tuple(sample for sample in samples if isinstance(sample, MetricSample)),
+            )
+            payload = asdict(observation)
+            payload["measured_at"] = observation.measured_at.isoformat().replace("+00:00", "Z")
+            print(json.dumps(payload, sort_keys=True, allow_nan=False))
+            expected = arguments.expect == "within-policy"
+            return 0 if observation.within_policy is expected else 1
 
         if arguments.command == "campaign":
             output = aggregate_campaign(
@@ -319,6 +466,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                     arguments.evidence_index,
                     "--evidence-index",
                 ),
+                artifact_receipt_paths=_grouped_values(
+                    arguments.artifact_receipt,
+                    "--artifact-receipt",
+                ),
+                artifact_verification_paths=_grouped_values(
+                    arguments.artifact_verification,
+                    "--artifact-verification",
+                ),
+                receipt_dependency_paths=_grouped_values(
+                    arguments.receipt_dependency,
+                    "--receipt-dependency",
+                ),
                 clock_relation_paths=arguments.clock_relation,
                 observation_output_dir=arguments.observation_output,
                 output_path=arguments.output,
@@ -332,6 +491,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(explain_bundle(bundle), indent=2, sort_keys=True, allow_nan=False))
             return 0
 
+        evaluator_receipts = _evaluator_receipts(arguments)
+
         if arguments.command == "evaluate":
             outputs = evaluate_from_evidence(
                 run_id=arguments.run_id,
@@ -339,6 +500,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 run_context_path=arguments.run_context,
                 bundle=bundle,
                 evidence_index_path=arguments.evidence_index,
+                artifact_receipt_paths=arguments.artifact_receipt,
+                artifact_verification_paths=arguments.artifact_verification,
+                receipt_dependency_paths=arguments.receipt_dependency,
+                evaluator_receipts=evaluator_receipts,
                 otel_metrics_path=arguments.otel_metrics,
                 window_start_ns=arguments.window_start_ns,
                 window_end_ns=arguments.window_end_ns,
@@ -351,6 +516,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 run_context_path=arguments.run_context,
                 bundle=bundle,
                 evidence_index_path=arguments.evidence_index,
+                artifact_receipt_paths=arguments.artifact_receipt,
+                artifact_verification_paths=arguments.artifact_verification,
+                receipt_dependency_paths=arguments.receipt_dependency,
+                evaluator_receipts=evaluator_receipts,
                 otel_metrics_path=arguments.otel_metrics,
                 measurement_complete_path=arguments.measurement_complete,
                 output_dir=arguments.output,

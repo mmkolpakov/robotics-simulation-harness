@@ -1,86 +1,112 @@
 {
-  "schema_version": "runtime-manifest.v2",
-  "runtime_id": "org.example.controller-hil-runtime",
-  "generated_at": "2026-07-12T10:00:00Z",
-  "oci_image": {
-    "reference": "ghcr.io/example/robotics-runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  "authorization": {
+    "execution_verification_sha256": "993b16dfa4ee41359be5831f1756fededa50fb0d3cac8241da87903881fdfba8",
+    "mode": "verified_execution_permit",
+    "permit_sha256": "407a59cbd730247a873117066239440c6128b724bee8d6d60ca4db41c80dfa58",
+    "trust_policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "clock": {
+    "basis": "system_time",
+    "drift_ppm": 2,
+    "offset_ms": 0.5,
+    "sync_protocol": "mavlink_timesync"
   },
   "components": {
     "contracts_revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     "harness_revision": "cccccccccccccccccccccccccccccccccccccccc",
     "infra_revision": "dddddddddddddddddddddddddddddddddddddddd"
   },
-  "host": {
-    "os": "ubuntu",
-    "os_version": "24.04",
+  "data_plane": {
+    "data_sharing": false,
+    "ipc_namespace": "container:observer",
+    "network_namespace": "compose:hil",
+    "private_ipc": true,
+    "rmw_implementation": "rmw_fastrtps_cpp",
+    "shm_transport": true
+  },
+  "evaluator_bindings": [],
+  "execution": {
+    "data_plane_profile": "secure_shared_memory",
+    "data_source": "live_target",
+    "plant_backend": "real_hardware",
+    "target_environment": "hil",
+    "time_mode": "hardware_realtime"
+  },
+  "execution_subject": {
+    "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "kind": "oci_image",
+    "locator": "oci://ghcr.io/example/robotics-runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "generated_at": "2026-07-12T10:00:00Z",
+  "host_platform": {
     "architecture": "x86_64",
-    "kernel": "6.8.0"
+    "kernel": "6.8.0",
+    "os": "ubuntu",
+    "os_version": "24.04"
   },
-  "ros": {
-    "distribution": "jazzy",
-    "rmw_implementation": "rmw_fastrtps_cpp"
+  "execution_platform": {
+    "architecture": "x86_64",
+    "kernel": "6.8.0",
+    "os": "ubuntu",
+    "os_version": "24.04"
   },
+  "lifecycle_states": [],
+  "physical_targets": [
+    {
+      "identity_kind": "pci_device",
+      "identity_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "preflight_evidence_sha256": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+      "scope": "compute",
+      "target_id": "compute-alpha"
+    },
+    {
+      "identity_kind": "mavlink_system_component",
+      "identity_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "preflight_evidence_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "scope": "controller",
+      "stable_device_path": "/dev/robotics/controller-alpha",
+      "target_id": "controller-alpha"
+    }
+  ],
+  "provider_bindings": [
+    {
+      "target_id": "controller-alpha",
+      "provider": {
+        "kind": "hardware_target",
+        "implementation_id": "fixture_controller",
+        "version": "1.0.0",
+        "configuration_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "qualification_profile_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "conformance_result_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+      "capabilities": [
+        "live_observation"
+      ]
+    }
+  ],
   "render": {
     "mode": "none",
     "renderer": "disabled"
   },
-  "workload": {
-    "kind": "none"
-  },
-  "execution": {
-    "target_environment": "hil",
-    "data_source": "live_target",
-    "plant_backend": "real_hardware",
-    "time_mode": "hardware_realtime",
-    "data_plane_profile": "secure_shared_memory"
-  },
-  "authorization": {
-    "mode": "verified_execution_permit",
-    "permit_sha256": "80eb07e5a0f5545197125d07d97481cd2865fd67f3c7757342e3917b86d74314",
-    "execution_verification_sha256": "8abbf6d9bc3c831eaf4838446e636d970c283b2de286d8db76fc75b777c7a930",
-    "trust_policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-  },
-  "data_plane": {
+  "ros": {
+    "distribution": "jazzy",
+    "domain_id": 42,
     "rmw_implementation": "rmw_fastrtps_cpp",
-    "ipc_namespace": "container:observer",
-    "network_namespace": "compose:hil",
-    "shm_transport": true,
-    "data_sharing": false,
-    "private_ipc": true
+    "rmw_version": "0.0.0-fixture"
   },
+  "runtime_id": "org.example.controller-hil-runtime",
+  "schema_version": "runtime-manifest.v1",
   "security": {
-    "profile": "sros2_enforce",
-    "strategy": "Enforce",
     "enclaves": [
       "/robotics/observer"
     ],
     "policy_digests": [
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-    ]
+    ],
+    "profile": "sros2_enforce",
+    "strategy": "Enforce"
   },
-  "lifecycle_states": [],
-  "physical_targets": [
-    {
-      "target_id": "compute-alpha",
-      "scope": "compute",
-      "identity_kind": "pci_device",
-      "identity_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-      "preflight_evidence_sha256": "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
-    },
-    {
-      "target_id": "controller-alpha",
-      "scope": "controller",
-      "identity_kind": "mavlink_system_component",
-      "identity_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-      "preflight_evidence_sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-      "stable_device_path": "/dev/robotics/controller-alpha"
-    }
-  ],
-  "clock": {
-    "basis": "system_time",
-    "sync_protocol": "mavlink_timesync",
-    "offset_ms": 0.5,
-    "drift_ppm": 2
+  "workload": {
+    "kind": "none"
   }
 }

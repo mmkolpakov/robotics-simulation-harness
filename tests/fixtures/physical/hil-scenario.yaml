@@ -1,4 +1,5 @@
-schema_version: acceptance-scenario.v4
+---
+schema_version: acceptance-scenario.v1
 scenario_id: org.example.controller-hil-observation
 execution:
   target_environment: hil
@@ -63,3 +64,8 @@ evidence_policy:
   upload_mode: closed_segments_during_run
   retention_class: hil-30d
   remote_sink_allowed: true
+provider_requirements:
+  capabilities:
+    - live_observation
+evaluator_requirements: []
+metric_definitions: []

@@ -24,7 +24,7 @@ from robotics_acceptance_harness.result import (
 )
 from robotics_acceptance_harness.time_authority import TimeAuthorityObservation
 from robotics_acceptance_harness.timing import TimingObservation
-from tests.support import local_evidence_segment, write_evidence_index
+from tests.support import local_evidence_artifact, write_evidence_index
 
 FIXTURES = Path(__file__).parent / "fixtures" / "simulation"
 RUN_ID = "run-00000000-0000-4000-8000-000000000001"
@@ -38,7 +38,7 @@ def result_inputs(tmp_path: Path, *, evidence_run_id: str = RUN_ID) -> dict[str,
         write_evidence_index(
             tmp_path / f"{evidence_run_id}-evidence.yaml",
             run_id=evidence_run_id,
-            segments=[local_evidence_segment(evidence_file)],
+            artifacts=[local_evidence_artifact(evidence_file)],
         )
     )
     snapshot = GraphSnapshot(

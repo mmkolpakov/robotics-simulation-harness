@@ -65,7 +65,7 @@ def test_bundle_exposes_runtime_manifest(pytester: pytest.Pytester) -> None:
     test_file = pytester.makepyfile(
         """
         def test_bundle(robotics_bundle):
-            assert robotics_bundle.runtime.schema_version == "runtime-manifest.v2"
+            assert robotics_bundle.runtime.schema_version == "runtime-manifest.v1"
             assert robotics_bundle.runtime.data["workload"]["kind"] == "none"
         """
     )

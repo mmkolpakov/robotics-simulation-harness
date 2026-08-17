@@ -51,8 +51,8 @@ def _mutated_verification_bundle(
 def test_load_bundle_aligns_physical_authorization() -> None:
     bundle = _valid_bundle()
 
-    assert bundle.scenario.schema_version == "acceptance-scenario.v4"
-    assert bundle.runtime.schema_version == "runtime-manifest.v2"
+    assert bundle.scenario.schema_version == "acceptance-scenario.v1"
+    assert bundle.runtime.schema_version == "runtime-manifest.v1"
     assert bundle.permit is not None
     assert bundle.permit.schema_version == "execution-permit.v1"
     assert bundle.verification is not None

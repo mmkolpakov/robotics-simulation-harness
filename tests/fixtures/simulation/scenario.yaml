@@ -1,12 +1,13 @@
-schema_version: acceptance-scenario.v4
+---
+schema_version: acceptance-scenario.v1
 scenario_id: org.example.physics-smoke
 execution:
   target_environment: simulation
   hardware_scope: []
   physical_effect: none
   test_intent: interface_smoke
-  data_source: gazebo
-  plant_backend: gazebo_physics
+  data_source: simulator
+  plant_backend: simulated_physics
   time_mode: simulation_realtime
   data_plane_profile: standard_isolated
   security_profile: none
@@ -48,7 +49,8 @@ data_plane_policy:
   data_sharing: false
   private_ipc: false
 evidence_policy:
-  topics: [/clock]
+  topics:
+    - /clock
   recording_mode: on_failure
   compression: zstd
   max_segment_size_bytes: 1048576
@@ -59,3 +61,8 @@ evidence_policy:
   upload_mode: local_only
   retention_class: pull-request-7d
   remote_sink_allowed: false
+provider_requirements:
+  capabilities:
+    - simulated_physics
+evaluator_requirements: []
+metric_definitions: []

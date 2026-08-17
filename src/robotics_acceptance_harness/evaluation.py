@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from importlib.machinery import PathFinder
 from importlib.metadata import EntryPoint, entry_points
+from pathlib import Path, PurePosixPath
 from typing import Any, cast
+
+from packaging.utils import canonicalize_name
 
 from robotics_acceptance_harness.documents import DocumentBundle
 from robotics_acceptance_harness.evidence import VerifiedEvidence
@@ -17,8 +23,10 @@ from robotics_acceptance_harness.policy import (
     evaluate_data_plane_policy,
     evaluate_evidence_policy,
 )
+from robotics_acceptance_harness.receipts import VerifiedReceiptSet
 
 EVALUATOR_ENTRY_POINT_GROUP = "robotics_acceptance.evaluators"
+_INSTALLER_GENERATED_NAMES = frozenset({"INSTALLER", "RECORD", "REQUESTED", "direct_url.json"})
 
 
 class EvaluationError(ValueError):
@@ -67,14 +75,136 @@ def _load_evaluator(entry_point: EntryPoint) -> ProductEvaluator:
     return cast(ProductEvaluator, evaluator)
 
 
-def _installed_evaluators() -> tuple[tuple[str, ProductEvaluator], ...]:
-    loaded: list[tuple[str, ProductEvaluator]] = []
-    for entry_point in sorted(
-        entry_points(group=EVALUATOR_ENTRY_POINT_GROUP),
-        key=lambda item: (item.name, item.value),
-    ):
-        loaded.append((entry_point.name, _load_evaluator(entry_point)))
-    return tuple(loaded)
+def _verify_installed_record(entry_point: EntryPoint) -> frozenset[Path]:
+    distribution = entry_point.dist
+    if distribution is None or distribution.files is None:
+        raise EvaluationError(f"entry point {entry_point.name!r} has no installed file manifest")
+    record_files = [path for path in distribution.files if str(path).endswith(".dist-info/RECORD")]
+    if len(record_files) != 1:
+        raise EvaluationError(f"distribution {distribution.name!r} must contain exactly one RECORD")
+    record_name = PurePosixPath(str(record_files[0]).replace("\\", "/"))
+    dist_info = record_name.parent
+    hashed_paths = {
+        Path(path.locate()).resolve() for path in distribution.files if path.hash is not None
+    }
+
+    verified_files = 0
+    for package_path in distribution.files:
+        installed_name = PurePosixPath(str(package_path).replace("\\", "/"))
+        installed_path = Path(package_path.locate())
+        if not installed_path.is_file():
+            raise EvaluationError(f"installed evaluator file is missing: {package_path}")
+        file_hash = package_path.hash
+        if file_hash is None:
+            installer_generated = (
+                installed_name.parent == dist_info
+                and installed_name.name in _INSTALLER_GENERATED_NAMES
+            )
+            if not installer_generated:
+                raise EvaluationError(
+                    f"installed evaluator file has no RECORD hash: {package_path}"
+                )
+            continue
+        try:
+            observed = (
+                base64.urlsafe_b64encode(
+                    hashlib.new(file_hash.mode, installed_path.read_bytes()).digest()
+                )
+                .rstrip(b"=")
+                .decode("ascii")
+            )
+        except ValueError as error:
+            raise EvaluationError(f"unsupported RECORD hash: {file_hash.mode}") from error
+        if observed != file_hash.value:
+            raise EvaluationError(f"installed evaluator file differs from RECORD: {package_path}")
+        verified_files += 1
+        if installed_name.suffix == ".py":
+            bytecode_candidates = [installed_path.with_suffix(".pyc")]
+            pycache = installed_path.parent / "__pycache__"
+            if pycache.is_dir():
+                bytecode_candidates.extend(pycache.glob(f"{installed_path.stem}.*.pyc"))
+            unverified = [
+                path
+                for path in bytecode_candidates
+                if path.is_file() and path.resolve() not in hashed_paths
+            ]
+            if unverified:
+                raise EvaluationError(
+                    f"installed evaluator has unverified bytecode cache: {unverified[0]}"
+                )
+    if verified_files == 0:
+        raise EvaluationError(f"distribution {distribution.name!r} RECORD has no file digests")
+    return frozenset(hashed_paths)
+
+
+def _verify_entry_point_origin(entry_point: EntryPoint, hashed_paths: frozenset[Path]) -> None:
+    search_path: Sequence[str] | None = None
+    qualified_name = ""
+    spec = None
+    for part in entry_point.module.split("."):
+        qualified_name = f"{qualified_name}.{part}" if qualified_name else part
+        spec = PathFinder.find_spec(qualified_name, search_path)
+        if spec is None:
+            raise EvaluationError(f"cannot resolve evaluator module {entry_point.module!r}")
+        search_path = spec.submodule_search_locations
+    if spec is None or spec.origin in {None, "built-in", "frozen"}:
+        raise EvaluationError(f"evaluator module {entry_point.module!r} has no file origin")
+    origin = Path(spec.origin).resolve()
+    if origin not in hashed_paths:
+        raise EvaluationError(
+            f"evaluator module {entry_point.module!r} resolves outside its verified RECORD"
+        )
+
+
+def _qualified_entry_points(
+    requirements: Sequence[Mapping[str, Any]],
+    receipts: VerifiedReceiptSet,
+) -> tuple[EntryPoint, ...]:
+    installed = tuple(entry_points(group=EVALUATOR_ENTRY_POINT_GROUP))
+    qualified: list[EntryPoint] = []
+    for requirement in requirements:
+        namespace = str(requirement["namespace"])
+        candidates = [entry_point for entry_point in installed if entry_point.name == namespace]
+        if len(candidates) != 1:
+            raise EvaluationError(
+                f"expected one evaluator entry point for {namespace!r}; found {len(candidates)}"
+            )
+        entry_point = candidates[0]
+        distribution = entry_point.dist
+        if distribution is None:
+            raise EvaluationError(f"evaluator {namespace!r} has no owning distribution")
+        observed = (
+            entry_point.value,
+            canonicalize_name(distribution.name),
+            distribution.version,
+        )
+        expected = (
+            requirement["entry_point"],
+            canonicalize_name(str(requirement["distribution"])),
+            requirement["version"],
+        )
+        if observed != expected:
+            raise EvaluationError(f"installed evaluator {namespace!r} differs from its binding")
+        receipts.verify_artifact(
+            str(requirement["receipt_sha256"]),
+            {"sha256": requirement["artifact_sha256"]},
+        )
+        hashed_paths = _verify_installed_record(entry_point)
+        _verify_entry_point_origin(entry_point, hashed_paths)
+        qualified.append(entry_point)
+    if {str(item["receipt_sha256"]) for item in requirements} != set(receipts.by_digest):
+        raise EvaluationError("evaluator qualification contains unreferenced receipts")
+    return tuple(qualified)
+
+
+def _installed_evaluators(
+    requirements: Sequence[Mapping[str, Any]],
+    receipts: VerifiedReceiptSet,
+) -> tuple[tuple[str, ProductEvaluator], ...]:
+    return tuple(
+        (entry_point.name, _load_evaluator(entry_point))
+        for entry_point in _qualified_entry_points(requirements, receipts)
+    )
 
 
 def _product_evaluations(
@@ -126,12 +256,12 @@ def evaluate_acceptance(
     context: EvaluationContext,
     *,
     evaluators: Sequence[tuple[str, ProductEvaluator]] | None = None,
+    evaluator_receipts: VerifiedReceiptSet | None = None,
 ) -> tuple[AssertionEvaluation, ...]:
     """Evaluate evidence through the canonical core and installed product evaluators."""
 
     scenario = context.scenario
-    if scenario["schema_version"] == "acceptance-scenario.v5":
-        validate_metric_definitions(scenario["metric_definitions"], context.metric_samples)
+    validate_metric_definitions(scenario["metric_definitions"], context.metric_samples)
     evaluations = list(
         evaluate_metric_assertions(
             scenario["assertions"],
@@ -154,7 +284,14 @@ def evaluate_acceptance(
     evaluations.extend(
         _product_evaluations(
             context,
-            tuple(evaluators) if evaluators is not None else _installed_evaluators(),
+            (
+                tuple(evaluators)
+                if evaluators is not None
+                else _installed_evaluators(
+                    scenario["evaluator_requirements"],
+                    evaluator_receipts or VerifiedReceiptSet({}),
+                )
+            ),
         )
     )
     identifiers = [item.assertion_id for item in evaluations]
@@ -164,16 +301,23 @@ def evaluate_acceptance(
     return tuple(evaluations)
 
 
-def evaluator_inventory() -> tuple[Mapping[str, str], ...]:
-    """Describe installed product evaluators without invoking them."""
+def evaluator_inventory(
+    requirements: Sequence[Mapping[str, Any]] = (),
+    receipts: VerifiedReceiptSet | None = None,
+) -> tuple[Mapping[str, str], ...]:
+    """Describe installed product evaluators without importing their targets."""
 
+    installed = (
+        _qualified_entry_points(requirements, receipts or VerifiedReceiptSet({}))
+        if requirements
+        else tuple(entry_points(group=EVALUATOR_ENTRY_POINT_GROUP))
+    )
     inventory: list[Mapping[str, str]] = []
     for entry_point in sorted(
-        entry_points(group=EVALUATOR_ENTRY_POINT_GROUP),
+        installed,
         key=lambda item: (item.name, item.value),
     ):
         assert isinstance(entry_point, EntryPoint)
-        _load_evaluator(entry_point)
         inventory.append(
             {
                 "namespace": entry_point.name,
@@ -181,6 +325,10 @@ def evaluator_inventory() -> tuple[Mapping[str, str], ...]:
                 "distribution": (
                     entry_point.dist.name if entry_point.dist is not None else "unknown"
                 ),
+                "version": (
+                    entry_point.dist.version if entry_point.dist is not None else "unknown"
+                ),
+                "status": "qualified" if requirements else "discovered",
             }
         )
     return tuple(inventory)

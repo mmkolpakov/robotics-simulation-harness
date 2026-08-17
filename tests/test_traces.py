@@ -146,7 +146,7 @@ def test_emitted_channel_errors_serialize_through_the_public_contract(tmp_path: 
         {"source": producers, "destination": [consumer]},
     )
     document = {
-        "schema_version": "zenoh-channel-observation.v1",
+        "schema_version": "transport-channel-observation.v1",
         "observation_id": "observation-00000000-0000-4000-8000-000000000001",
         "run_id": "run-00000000-0000-4000-8000-000000000001",
         "channel_id": "sensor.control",

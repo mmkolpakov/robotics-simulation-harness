@@ -27,12 +27,6 @@ jobs:
         with:
           persist-credentials: false
           path: robotics-acceptance-harness
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-        with:
-          repository: mmkolpakov/robotics-runtime-contracts
-          ref: 12d993e292b28e03380188414665aac07626616e
-          persist-credentials: false
-          path: robotics-runtime-contracts
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
         with:
           version: "0.11.28"
@@ -53,13 +47,17 @@ jobs:
           uv run coverage report --show-missing --fail-under=80
           uv run coverage xml -o artifacts/coverage.xml
       - name: Build wheel and source distribution
-        run: uv build --no-sources --out-dir artifacts/dist
+        run: |
+          uv export --locked --no-dev --no-emit-project \
+            --format requirements.txt \
+            --output-file artifacts/runtime-requirements.txt
+          uv build --no-sources --out-dir artifacts/dist
       - name: Verify installed wheel
         run: |
           uv venv --python 3.12 .wheel-venv
           uv pip install --python .wheel-venv/bin/python \
             "pytest>=8,<10" \
-            ../robotics-runtime-contracts \
+            --requirement artifacts/runtime-requirements.txt \
             artifacts/dist/*.whl
           .wheel-venv/bin/robotics-acceptance --version
           .wheel-venv/bin/robotics-acceptance explain \
@@ -90,12 +88,6 @@ jobs:
         with:
           persist-credentials: false
           path: robotics-acceptance-harness
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-        with:
-          repository: mmkolpakov/robotics-runtime-contracts
-          ref: 12d993e292b28e03380188414665aac07626616e
-          persist-credentials: false
-          path: robotics-runtime-contracts
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
         with:
           version: "0.11.28"

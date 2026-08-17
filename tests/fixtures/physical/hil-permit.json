@@ -1,30 +1,30 @@
 {
-  "schema_version": "execution-permit.v1",
-  "predicate_type": "https://robotics-runtime-contracts.dev/attestations/execution-permit/v1",
-  "permit_id": "org.example.hil-permit-001",
-  "scenario_sha256": "c9fec5fcc247b74f8ccffe79d9a3b1e01e99679e725b5f86174bbca6be3ee086",
-  "image_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "trust_policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "target": {
-    "environment": "hil",
-    "target_id": "controller-alpha",
-    "identity_kind": "mavlink_system_component",
-    "identity_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-  },
   "allowed_physical_effect": "none",
+  "approver_id": "safety@example.org",
+  "expires_at": "2026-07-12T10:10:00Z",
   "hardware_scope": [
     "compute",
     "controller"
   ],
-  "issued_at": "2026-07-12T09:55:00Z",
-  "expires_at": "2026-07-12T10:10:00Z",
-  "nonce": "0123456789abcdef0123456789abcdef",
-  "operator_id": "operator@example.org",
-  "approver_id": "safety@example.org",
   "interlock_check": {
+    "checked_at": "2026-07-12T09:54:00Z",
     "reference": "s3://robotics-evidence/interlocks/controller-alpha.json",
     "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-    "status": "passed",
-    "checked_at": "2026-07-12T09:54:00Z"
-  }
+    "status": "passed"
+  },
+  "issued_at": "2026-07-12T09:55:00Z",
+  "nonce": "0123456789abcdef0123456789abcdef",
+  "operator_id": "operator@example.org",
+  "permit_id": "org.example.hil-permit-001",
+  "predicate_type": "https://robotics-runtime-contracts.dev/attestations/execution-permit/v1",
+  "scenario_sha256": "16878b8e3c29f53d255d1b7883bf3f708552e77a4e6dd58b9eabc989b1f32b97",
+  "schema_version": "execution-permit.v1",
+  "subject_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "target": {
+    "environment": "hil",
+    "identity_kind": "mavlink_system_component",
+    "identity_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "target_id": "controller-alpha"
+  },
+  "trust_policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 }

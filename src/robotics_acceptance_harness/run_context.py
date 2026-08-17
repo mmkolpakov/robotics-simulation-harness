@@ -28,7 +28,7 @@ def create_run_context(
 
     scenario = load_document(
         scenario_path,
-        expected_schemas={"acceptance-scenario.v4", "acceptance-scenario.v5"},
+        expected_role="acceptance_scenario",
         extension_schemas=extension_schemas,
     )
     resolved_run_id = run_id or f"run-{uuid4()}"
@@ -61,7 +61,7 @@ def load_run_context(
 ) -> LoadedDocument:
     """Load an immutable run context and bind it to one domain execution."""
 
-    context = load_document(path, expected_schemas={"acceptance-run.v1"})
+    context = load_document(path, expected_role="acceptance_run")
     if context.data["run_id"] != run_id:
         raise BundleValidationError("$.run_id", "run context does not match --run-id")
     if context.data["scenario_id"] != scenario_id:

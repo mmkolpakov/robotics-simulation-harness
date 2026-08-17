@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,8 @@ from robotics_acceptance_harness.metrics import (
     MetricSample,
     MetricTemporality,
 )
+
+OTLP_JSON_LINES_MEDIA_TYPE = "application/x-ndjson"
 
 
 class MetricInputError(ValueError):
@@ -193,3 +196,19 @@ def load_otlp_json_metrics(
                                 f"invalid OTLP metric at {source}:{line_number}: {error}"
                             ) from error
     return tuple(samples)
+
+
+def select_metric_points(
+    samples: Sequence[MetricPoint],
+    *,
+    run_id: str,
+    domain_id: str,
+) -> tuple[MetricPoint, ...]:
+    """Select points attributed to one run and logical domain."""
+
+    return tuple(
+        sample
+        for sample in samples
+        if sample.attributes.get("run.id") == run_id
+        and sample.attributes.get("domain.id") == domain_id
+    )

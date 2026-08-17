@@ -19,7 +19,7 @@ from robotics_acceptance_harness.policy import (
     evaluate_data_plane_policy,
     evaluate_evidence_policy,
 )
-from tests.support import local_mcap_segment, write_evidence_index
+from tests.support import local_recording_artifact, write_evidence_index
 
 RUN_ID = "run-01234567-89ab-4def-8123-456789abcdef"
 
@@ -29,8 +29,8 @@ def evidence(tmp_path: Path, *, topic: str = "/camera/image"):
         tmp_path / "evidence-index.json",
         run_id=RUN_ID,
         recording_mode="bounded",
-        segments=[
-            local_mcap_segment(
+        artifacts=[
+            local_recording_artifact(
                 tmp_path / "run_0.mcap",
                 topics={topic: "sensor_msgs/msg/Image"},
             )
@@ -166,11 +166,13 @@ def test_evidence_policy_fails_when_required_channel_is_absent(tmp_path: Path) -
 
 def test_data_plane_policy_checks_static_transport_and_attributed_metrics() -> None:
     policy = data_plane_policy(shm_transport=True)
+    policy["middleware_configuration_sha256"] = "a" * 64
     runtime = {
         "data_plane": {
             "shm_transport": True,
             "data_sharing": False,
             "private_ipc": False,
+            "middleware_configuration_sha256": "a" * 64,
         }
     }
     samples = [
@@ -189,6 +191,10 @@ def test_data_plane_policy_checks_static_transport_and_attributed_metrics() -> N
 
     static = next(item for item in evaluations if item.assertion_id == "data-plane-private-ipc")
     assert static.status == "failed"
+    middleware = next(
+        item for item in evaluations if item.assertion_id == "data-plane-middleware-configuration"
+    )
+    assert middleware.status == "passed"
     assert all(
         item.status == "passed"
         for item in evaluations
