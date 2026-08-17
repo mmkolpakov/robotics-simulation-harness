@@ -31,18 +31,15 @@ def aggregate_campaign(
         raise BundleValidationError("$.runs", "at least one aggregate is required")
     scenario = load_document(
         scenario_path,
-        expected_schemas={"acceptance-scenario.v4", "acceptance-scenario.v5"},
+        expected_role="acceptance_scenario",
         extension_schemas=extension_schemas,
     )
-    contexts = [
-        load_document(path, expected_schemas={"acceptance-run.v1"}) for path in run_context_paths
-    ]
+    contexts = [load_document(path, expected_role="acceptance_run") for path in run_context_paths]
     context_by_run = {str(item.data["run_id"]): item for item in contexts}
     if len(context_by_run) != len(contexts):
         raise BundleValidationError("$.runs", "run context IDs must be unique")
     aggregates = [
-        load_document(path, expected_schemas={"acceptance-aggregate.v4"})
-        for path in aggregate_paths
+        load_document(path, expected_role="acceptance_aggregate") for path in aggregate_paths
     ]
     run_ids = [str(item.data["run_id"]) for item in aggregates]
     if len(run_ids) != len(set(run_ids)):

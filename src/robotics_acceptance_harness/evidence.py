@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import file_digest
 from os import name as os_name
@@ -9,12 +9,15 @@ from types import MappingProxyType
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
-from robotics_runtime_contracts import SchemaCompatibilityError, validate_companion_schema
-
 from robotics_acceptance_harness.documents import (
     BundleValidationError,
     LoadedDocument,
     load_document,
+)
+from robotics_acceptance_harness.receipts import (
+    ReceiptValidationError,
+    VerifiedReceiptSet,
+    load_verified_receipts,
 )
 
 
@@ -32,7 +35,8 @@ class VerifiedEvidence:
     index: LoadedDocument
     links: tuple[Mapping[str, Any], ...]
     local_files: Mapping[Path, Mapping[str, Any]]
-    mcap_summaries: tuple[LoadedDocument, ...] = ()
+    recording_summaries: tuple[LoadedDocument, ...] = ()
+    receipts: tuple[LoadedDocument, ...] = ()
 
 
 def _local_path(value: str) -> Path:
@@ -42,10 +46,10 @@ def _local_path(value: str) -> Path:
     return Path(decoded)
 
 
-def _local_link(segment: Mapping[str, Any], index: int) -> tuple[Path, Mapping[str, Any]]:
-    path = _local_path(str(segment["local_path"]))
-    json_path = f"$.segments[{index}]"
-    uri = urlsplit(str(segment["uri"]))
+def _local_link(artifact: Mapping[str, Any], index: int) -> tuple[Path, Mapping[str, Any]]:
+    path = _local_path(str(artifact["local_path"]))
+    json_path = f"$.artifacts[{index}]"
+    uri = urlsplit(str(artifact["uri"]))
     if uri.scheme != "file" or uri.netloc not in {"", "localhost"}:
         raise EvidenceValidationError(
             f"{json_path}.uri",
@@ -55,59 +59,75 @@ def _local_link(segment: Mapping[str, Any], index: int) -> tuple[Path, Mapping[s
     if uri_path.resolve() != path.resolve():
         raise EvidenceValidationError(
             f"{json_path}.local_path",
-            f"does not identify file URI {segment['uri']}",
+            f"does not identify file URI {artifact['uri']}",
         )
     if not path.is_file():
         raise EvidenceValidationError(f"{json_path}.local_path", f"file does not exist: {path}")
     observed_size = path.stat().st_size
-    if observed_size != segment["size_bytes"]:
+    if observed_size != artifact["size_bytes"]:
         raise EvidenceValidationError(
             f"{json_path}.size_bytes",
-            f"expected {segment['size_bytes']}; observed {observed_size}",
+            f"expected {artifact['size_bytes']}; observed {observed_size}",
         )
     with path.open("rb") as stream:
         observed_digest = file_digest(stream, "sha256").hexdigest()
-    if observed_digest != segment["sha256"]:
+    if observed_digest != artifact["sha256"]:
         raise EvidenceValidationError(
             f"{json_path}.sha256",
-            f"expected {segment['sha256']}; observed {observed_digest}",
+            f"expected {artifact['sha256']}; observed {observed_digest}",
         )
-    return path.resolve(), _result_link(segment)
+    return path.resolve(), _result_link(artifact)
 
 
-def _remote_link(segment: Mapping[str, Any], index: int) -> Mapping[str, Any]:
-    json_path = f"$.segments[{index}]"
-    if segment["upload_status"] != "confirmed" or not segment["checksum_verified"]:
-        raise EvidenceValidationError(json_path, "remote evidence is not confirmed")
-    if str(segment["uri"]).startswith("s3://") and not segment.get("version_id"):
-        raise EvidenceValidationError(f"{json_path}.version_id", "S3 evidence has no version ID")
-    return _result_link(segment)
+def _remote_link(
+    artifact: Mapping[str, Any],
+    index: int,
+    receipts: VerifiedReceiptSet,
+    run_id: str,
+) -> Mapping[str, Any]:
+    json_path = f"$.artifacts[{index}]"
+    expected = {
+        field: artifact[field]
+        for field in ("uri", "sha256", "size_bytes", "media_type", "immutable_revision")
+    }
+    try:
+        receipts.verify_artifact(
+            str(artifact["receipt_sha256"]),
+            expected,
+            run_id=run_id,
+        )
+    except ValueError as error:
+        raise EvidenceValidationError(json_path, str(error)) from error
+    return _result_link(artifact)
 
 
-def _result_link(segment: Mapping[str, Any]) -> Mapping[str, Any]:
+def _result_link(artifact: Mapping[str, Any]) -> Mapping[str, Any]:
     fields = (
+        "artifact_id",
+        "kind",
         "uri",
-        "version_id",
+        "immutable_revision",
+        "receipt_sha256",
         "media_type",
         "sha256",
         "size_bytes",
         "retention_class",
         "segment_index",
     )
-    return MappingProxyType({field: segment[field] for field in fields if field in segment})
+    return MappingProxyType({field: artifact[field] for field in fields if field in artifact})
 
 
 def _local_summary(
-    segment: Mapping[str, Any],
+    artifact: Mapping[str, Any],
     index: int,
 ) -> LoadedDocument:
-    reference = segment["mcap_summary"]
-    json_path = f"$.segments[{index}].mcap_summary"
+    reference = artifact["recording_summary"]
+    json_path = f"$.artifacts[{index}].recording_summary"
     uri = urlsplit(str(reference["uri"]))
     if uri.scheme != "file" or uri.netloc not in {"", "localhost"}:
         raise EvidenceValidationError(
             f"{json_path}.uri",
-            "acceptance verification requires a local MCAP summary",
+            "acceptance verification requires a local recording summary",
         )
     path = _local_path(uri.path).resolve()
     if not path.is_file():
@@ -115,15 +135,15 @@ def _local_summary(
     if path.stat().st_size != reference["size_bytes"]:
         raise EvidenceValidationError(f"{json_path}.size_bytes", "summary size differs")
     try:
-        summary = load_document(path, expected_schemas={"mcap-summary.v1"})
+        summary = load_document(path, expected_role="recording_summary")
     except BundleValidationError as error:
         raise EvidenceValidationError(error.json_path, error.validation_message) from error
     if summary.sha256 != reference["sha256"]:
         raise EvidenceValidationError(f"{json_path}.sha256", "summary digest differs")
-    if summary.data["source_sha256"] != segment["sha256"]:
+    if summary.data["source_sha256"] != artifact["sha256"]:
         raise EvidenceValidationError(
             f"{json_path}.source_sha256",
-            "summary does not identify its MCAP segment",
+            "summary does not identify its recording artifact",
         )
     return summary
 
@@ -132,26 +152,19 @@ def load_evidence_index(
     path: str | Path,
     *,
     expected_run_id: str | None = None,
-    scenario_schema: str | None = None,
+    receipt_paths: Sequence[str | Path] = (),
+    verification_paths: Sequence[str | Path] = (),
+    receipt_dependency_paths: Sequence[str | Path] = (),
 ) -> VerifiedEvidence:
     """Validate a finalized index and verify every reusable evidence link."""
 
     try:
         document = load_document(
             path,
-            expected_schemas={"evidence-index.v2", "evidence-index.v3"},
+            expected_role="evidence_index",
         )
     except BundleValidationError as error:
         raise EvidenceValidationError(error.json_path, error.validation_message) from error
-    if scenario_schema is not None:
-        try:
-            validate_companion_schema(
-                scenario_schema,
-                "evidence_index",
-                document.schema_version,
-            )
-        except SchemaCompatibilityError as error:
-            raise EvidenceValidationError("$.schema_version", str(error)) from error
     if expected_run_id is not None and document.data["run_id"] != expected_run_id:
         raise EvidenceValidationError(
             "$.run_id",
@@ -161,18 +174,32 @@ def load_evidence_index(
     links: list[Mapping[str, Any]] = []
     local_files: dict[Path, Mapping[str, Any]] = {}
     summaries: list[LoadedDocument] = []
-    for index, segment in enumerate(document.data["segments"]):
-        if segment["upload_status"] == "local":
-            local_path, link = _local_link(segment, index)
+    try:
+        receipts = load_verified_receipts(
+            receipt_paths=receipt_paths,
+            verification_paths=verification_paths,
+            dependency_paths=receipt_dependency_paths,
+        )
+    except ReceiptValidationError as error:
+        raise EvidenceValidationError(error.json_path, error.validation_message) from error
+    used_receipts: set[str] = set()
+    run_id = str(document.data["run_id"])
+    for index, artifact in enumerate(document.data["artifacts"]):
+        if artifact["storage_state"] == "local":
+            local_path, link = _local_link(artifact, index)
             local_files[local_path] = link
             links.append(link)
         else:
-            links.append(_remote_link(segment, index))
-        if segment["media_type"] == "application/mcap":
-            summaries.append(_local_summary(segment, index))
+            links.append(_remote_link(artifact, index, receipts, run_id))
+            used_receipts.add(str(artifact["receipt_sha256"]))
+        if artifact["kind"] == "recording":
+            summaries.append(_local_summary(artifact, index))
+    if used_receipts != set(receipts.by_digest):
+        raise EvidenceValidationError("$.receipts", "unreferenced artifact receipt")
     return VerifiedEvidence(
         document,
         tuple(links),
         MappingProxyType(local_files),
         tuple(summaries),
+        tuple(item.receipt for item in receipts.by_digest.values()),
     )

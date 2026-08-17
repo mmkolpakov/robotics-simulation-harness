@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  CONTRACTS_VERSION: "0.16.0"
+
 defaults:
   run:
     shell: bash
@@ -23,6 +26,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
+      attestations: read
       contents: read
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
@@ -30,12 +34,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           path: robotics-acceptance-harness
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-        with:
-          repository: mmkolpakov/robotics-runtime-contracts
-          ref: 12d993e292b28e03380188414665aac07626616e
-          persist-credentials: false
-          path: robotics-runtime-contracts
       - name: Verify tag belongs to main
         run: |
           set -euo pipefail
@@ -74,15 +72,37 @@ jobs:
           SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
           export SOURCE_DATE_EPOCH
           uv build --no-sources --out-dir dist
+      - name: Download and verify contracts wheel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir contracts-dist
+          gh release download "v${CONTRACTS_VERSION}" \
+            --repo mmkolpakov/robotics-runtime-contracts \
+            --pattern "robotics_runtime_contracts-${CONTRACTS_VERSION}-py3-none-any.whl" \
+            --dir contracts-dist
+          contracts_wheel="$(find contracts-dist -maxdepth 1 -type f -name '*.whl' -print -quit)"
+          test -n "$contracts_wheel"
+          gh attestation verify "$contracts_wheel" \
+            --repo mmkolpakov/robotics-runtime-contracts
       - name: Verify built wheel
         run: |
           set -euo pipefail
           wheel="$(find dist -maxdepth 1 -type f -name '*.whl' -print -quit)"
+          contracts_wheel="$(find contracts-dist -maxdepth 1 -type f -name '*.whl' -print -quit)"
           test -n "$wheel"
+          test -n "$contracts_wheel"
           uv run --isolated --no-project \
-            --with ../robotics-runtime-contracts \
+            --with "$contracts_wheel" \
             --with "$wheel" \
             robotics-acceptance --version
+          uv run --isolated --no-project \
+            --with "$contracts_wheel" \
+            --with "$wheel" \
+            robotics-acceptance explain \
+              --scenario tests/fixtures/simulation/scenario.yaml \
+              --runtime tests/fixtures/simulation/runtime.yaml
       - name: Upload distributions
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:

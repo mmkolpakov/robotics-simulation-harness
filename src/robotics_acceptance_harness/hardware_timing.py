@@ -9,7 +9,7 @@ from typing import Any
 
 from robotics_runtime_contracts import hardware_clock_within_policy
 
-from robotics_acceptance_harness.metrics import MetricSample
+from robotics_acceptance_harness.metrics import MetricPoint, MetricSample
 from robotics_acceptance_harness.timing import utc_datetime_from_unix_ns
 
 OFFSET_METRIC = "robotics.hardware.clock.offset"
@@ -52,10 +52,12 @@ class HardwareTimingObservation:
     within_policy: bool
 
 
-def _timing_samples(samples: Sequence[MetricSample]) -> dict[str, list[MetricSample]]:
+def _timing_samples(samples: Sequence[MetricPoint]) -> dict[str, list[MetricSample]]:
     grouped: dict[str, list[MetricSample]] = defaultdict(list)
     for sample in samples:
         if sample.name in _METRIC_UNITS:
+            if not isinstance(sample, MetricSample):
+                raise HardwareTimingInputError(f"{sample.name} must be an OTLP gauge or sum point")
             grouped[sample.name].append(sample)
     missing = sorted(set(_METRIC_UNITS) - set(grouped))
     if missing:
@@ -111,7 +113,7 @@ def _aligned_points(
 
 def evaluate_hardware_timing(
     time_policy: Mapping[str, Any],
-    samples: Sequence[MetricSample],
+    samples: Sequence[MetricPoint],
 ) -> HardwareTimingObservation:
     """Evaluate host-produced hardware clock measurements from standard OTLP points."""
 

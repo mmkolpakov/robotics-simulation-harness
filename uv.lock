@@ -537,11 +537,12 @@ wheels = [
 
 [[package]]
 name = "robotics-acceptance-harness"
-version = "0.17.1"
+version = "0.18.0"
 source = { editable = "." }
 dependencies = [
     { name = "junitparser" },
     { name = "opentelemetry-proto" },
+    { name = "packaging" },
     { name = "pyyaml" },
     { name = "robotics-runtime-contracts" },
 ]
@@ -567,9 +568,10 @@ dev = [
 requires-dist = [
     { name = "junitparser", specifier = ">=5.0.1,<6" },
     { name = "opentelemetry-proto", specifier = "==1.43.0" },
+    { name = "packaging", specifier = ">=24,<27" },
     { name = "pytest", marker = "extra == 'pytest'", specifier = ">=8,<10" },
     { name = "pyyaml", specifier = ">=6.0.3,<7" },
-    { name = "robotics-runtime-contracts", editable = "../robotics-runtime-contracts" },
+    { name = "robotics-runtime-contracts", git = "https://github.com/mmkolpakov/robotics-runtime-contracts.git?rev=6c6b72a90eda7540bdc84992fd7b26acd78ea8fe" },
 ]
 provides-extras = ["pytest"]
 
@@ -587,33 +589,13 @@ dev = [
 
 [[package]]
 name = "robotics-runtime-contracts"
-version = "0.15.3"
-source = { editable = "../robotics-runtime-contracts" }
+version = "0.16.0"
+source = { git = "https://github.com/mmkolpakov/robotics-runtime-contracts.git?rev=6c6b72a90eda7540bdc84992fd7b26acd78ea8fe#6c6b72a90eda7540bdc84992fd7b26acd78ea8fe" }
 dependencies = [
     { name = "json-merge-patch" },
     { name = "jsonschema", extra = ["format-nongpl"] },
     { name = "pyyaml" },
     { name = "referencing" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "json-merge-patch", specifier = "==0.3.0" },
-    { name = "jsonschema", extras = ["format-nongpl"], specifier = ">=4.26,<5" },
-    { name = "pyyaml", specifier = ">=6.0.3,<7" },
-    { name = "referencing", specifier = ">=0.37,<0.38" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "check-jsonschema", specifier = "==0.37.4" },
-    { name = "mypy", specifier = "==2.3.0" },
-    { name = "pre-commit", specifier = "==4.6.0" },
-    { name = "pytest", specifier = "==9.1.1" },
-    { name = "ruff", specifier = "==0.15.21" },
-    { name = "types-jsonschema", specifier = "==4.26.0.20260518" },
-    { name = "types-pyyaml", specifier = "==6.0.12.20260518" },
-    { name = "yamllint", specifier = "==1.38.0" },
 ]
 
 [[package]]

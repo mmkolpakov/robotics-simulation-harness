@@ -9,10 +9,12 @@ from types import MappingProxyType
 from typing import Any, NotRequired, TypedDict, cast
 
 from robotics_runtime_contracts import (
-    SchemaCompatibilityError,
+    ProviderRequirementError,
     loads_mapping,
-    validate_companion_schema,
+    schema_for_role,
     validate_document,
+    validate_provider_requirements,
+    validate_role,
 )
 
 from robotics_acceptance_harness.authorization import (
@@ -44,6 +46,8 @@ class ScenarioDocument(TypedDict):
     data_plane_policy: Mapping[str, Any]
     evidence_policy: Mapping[str, Any]
     assertions: tuple[Mapping[str, Any], ...]
+    evaluator_requirements: tuple[Mapping[str, Any], ...]
+    provider_requirements: Mapping[str, Any]
     model_manifest_sha256: NotRequired[str]
     dataset_manifest_sha256: NotRequired[str]
 
@@ -59,6 +63,10 @@ class RuntimeDocument(TypedDict):
     execution: RuntimeExecutionDocument
     security: Mapping[str, Any]
     workload: RuntimeWorkloadDocument
+    execution_subject: Mapping[str, Any]
+    ros: Mapping[str, Any]
+    evaluator_bindings: tuple[Mapping[str, Any], ...]
+    provider_bindings: tuple[Mapping[str, Any], ...]
     data_plane: NotRequired[Mapping[str, Any]]
 
 
@@ -142,7 +150,7 @@ def _read_mapping(path: Path) -> tuple[bytes, dict[str, Any]]:
 def load_document(
     path: str | Path,
     *,
-    expected_schemas: set[str] | None = None,
+    expected_role: str | None = None,
     extension_schemas: Mapping[str, bytes | str] | None = None,
 ) -> LoadedDocument:
     """Load, validate, hash, and freeze one contract document."""
@@ -150,14 +158,16 @@ def load_document(
     resolved_path = Path(path).expanduser().resolve()
     raw, value = _read_mapping(resolved_path)
     schema_version = value.get("schema_version")
-    if expected_schemas is not None and schema_version not in expected_schemas:
-        expected = ", ".join(sorted(expected_schemas))
+    if expected_role is not None and schema_version != schema_for_role(expected_role):
         raise BundleValidationError(
             "$.schema_version",
-            f"expected one of {expected}; received {schema_version!r}",
+            f"expected {schema_for_role(expected_role)}; received {schema_version!r}",
         )
     try:
-        validate_document(value, extension_schemas=extension_schemas)
+        if expected_role is None:
+            validate_document(value, extension_schemas=extension_schemas)
+        else:
+            validate_role(value, expected_role, extension_schemas=extension_schemas)
     except ValueError as error:
         raise BundleValidationError("$", f"invalid {resolved_path}: {error}") from error
     return LoadedDocument(
@@ -195,6 +205,19 @@ def _validate_execution_alignment(
         scenario_execution["security_profile"],
         runtime["security"]["profile"],
     )
+
+
+def _validate_provider_alignment(
+    scenario: ScenarioDocument,
+    runtime: RuntimeDocument,
+) -> None:
+    try:
+        validate_provider_requirements(
+            scenario["provider_requirements"],
+            runtime["provider_bindings"],
+        )
+    except ProviderRequirementError as error:
+        raise BundleValidationError("$.runtime.provider_bindings", str(error)) from error
 
 
 def _validate_model_alignment(
@@ -273,7 +296,7 @@ def load_bundle(
 
     scenario = load_document(
         scenario_path,
-        expected_schemas={"acceptance-scenario.v4", "acceptance-scenario.v5"},
+        expected_role="acceptance_scenario",
         extension_schemas=extension_schemas,
     )
     if runtime_path is None:
@@ -283,35 +306,27 @@ def load_bundle(
         )
     runtime = load_document(
         runtime_path,
-        expected_schemas={"runtime-manifest.v1", "runtime-manifest.v2", "runtime-manifest.v3"},
+        expected_role="runtime_manifest",
     )
-    try:
-        validate_companion_schema(
-            scenario.schema_version,
-            "runtime_manifest",
-            runtime.schema_version,
-        )
-    except SchemaCompatibilityError as error:
-        raise BundleValidationError("$.runtime.schema_version", str(error)) from error
     model = (
-        load_document(model_path, expected_schemas={"model-artifact-manifest.v1"})
+        load_document(model_path, expected_role="model_artifact_manifest")
         if model_path is not None
         else None
     )
     dataset = (
-        load_document(dataset_path, expected_schemas={"dataset-manifest.v1"})
+        load_document(dataset_path, expected_role="dataset_manifest")
         if dataset_path is not None
         else None
     )
     permit = (
-        load_document(permit_path, expected_schemas={"execution-permit.v1"})
+        load_document(permit_path, expected_role="execution_permit")
         if permit_path is not None
         else None
     )
     verification = (
         load_document(
             verification_path,
-            expected_schemas={"execution-verification.v1"},
+            expected_role="execution_verification",
         )
         if verification_path is not None
         else None
@@ -320,6 +335,12 @@ def load_bundle(
     scenario_data = cast(ScenarioDocument, scenario.data)
     runtime_data = cast(RuntimeDocument, runtime.data)
     _validate_execution_alignment(scenario_data, runtime_data)
+    _validate_provider_alignment(scenario_data, runtime_data)
+    _require_equal(
+        "$.runtime.evaluator_bindings",
+        scenario_data["evaluator_requirements"],
+        runtime_data["evaluator_bindings"],
+    )
     _validate_model_alignment(scenario_data, runtime_data, model)
     _validate_dataset_alignment(scenario_data, dataset)
     checked_at = now or datetime.now(UTC)

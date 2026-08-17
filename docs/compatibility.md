@@ -1,61 +1,40 @@
-# Compatibility Policy
+# Compatibility
 
-## Versioning
+## Package Line
 
-`robotics-acceptance-harness` uses Semantic Versioning. Before `1.0.0`, a minor
-release may change Python APIs, CLI behavior, and accepted contract versions;
-patch releases remain backward compatible. The documented CLI, exit codes,
-pytest fixtures, and emitted documents are public interfaces.
+The `0.18.x` harness line requires Python 3.12 or 3.13 and
+`robotics-runtime-contracts>=0.16,<0.17`.
 
-The distribution requires `robotics-runtime-contracts>=0.15,<0.16`.
-Development uses the sibling checkout through `tool.uv.sources`; published
-wheel metadata contains only this version range. `uv build --no-sources` is the
-packaging gate.
+The repository is pre-1.0 and has no external consumers. Each public document
+family therefore has one canonical `v1`; superseded experimental v2-v5 schemas
+and compatibility branches are intentionally absent. The first stable release
+will establish the long-term compatibility baseline.
 
-## Contract Baseline
+## Document Set
 
-| Input or output | Accepted versions |
-| --- | --- |
-| Scenario | `acceptance-scenario.v5`, `v4` reader |
-| Runtime manifest | `runtime-manifest.v3`, `v1`/`v2` readers |
-| Result | `acceptance-result.v5`, `v4` reader for aggregation |
-| Run context | `acceptance-run.v1` |
-| Per-domain and cross-domain aggregate | `acceptance-aggregate.v4` |
-| Evidence index | `evidence-index.v3`, `v2` reader |
-| Transport qualification | `transport-qualification-result.v2`; `v1` reader only with a v4 scenario |
-| Campaign summary | `campaign-summary.v1` |
+The authoritative role-to-schema mapping is the contracts package catalog. The
+harness calls its public `schema_for_role()` and `validate_role()` APIs and does
+not maintain a second compatibility table.
 
-Unknown identifiers fail closed. Published schema bytes remain immutable; an
-incompatible change receives a new identifier. Before `1.0.0`, obsolete
-contract readers are removed from the current package instead of becoming a
-permanent compatibility layer. Historical tags remain the archive.
+Unknown schema versions, wrong document roles, and contradictory bundle facts
+fail before observation or evaluation begins. Scenario extensions remain
+separately versioned and digest-pinned by their canonical URI.
 
-`verify` requires `--scenario`, `--runtime`, `--run-id`, `--domain-id`,
-`--run-context`, `--evidence-index`, `--otel-metrics`,
-`--measurement-complete`, and `--output`.
-Aggregation accepts v4 or v5 domain results and an optional canonical transport
-qualification. A v5 scenario requires transport v2 so the clock relation cannot
-be bypassed. Aggregation emits one v4 aggregate whose cross-domain verdict is
-either `unevaluated` or a digest-pinned transport reference.
+## Provider Compatibility
 
-## Runtime Baseline
+The stable interface contains observed capabilities and implementation
+bindings, not a closed simulator, middleware, storage, or accelerator list.
+Provider qualification belongs to runtime infrastructure. A new provider is
+compatible when it emits the existing canonical documents and passes the same
+conformance suite.
 
-The current contracts identify ROS 2 Jazzy, Gazebo Harmonic where simulation is
-present, OTLP JSON metrics, MCAP evidence, and zstd compression. Document-only
-commands require Python 3.12 or 3.13; live observation also requires the Jazzy
-`rclpy` environment and declared ROS message packages.
+The Python-only commands work without ROS. Live observation requires the ROS 2
+packages and message interfaces declared by the runtime. Exact provider and
+hardware support is stated by the qualified runtime artifact, not inferred from
+installing this package.
 
-A different ROS distribution, simulator generation, or evidence encoding is a
-new qualified baseline and requires a contract revision when a current constant
-changes.
+## Dependency Reproducibility
 
-## Extensions
-
-Local domain extensions are separate, digest-pinned schemas. They cannot replace
-common safety, timing, transport, authorization, or evidence fields. Reusable
-fields enter the shared contracts through a reviewed schema revision.
-
-## Support
-
-Python 3.12 and 3.13 are tested. Security fixes target the latest tagged minor
-release.
+`uv.lock` pins the exact contracts Git revision for repository development.
+Release artifacts replace that source with published, provenance-verified
+wheels. CI must test installed wheels without editable sibling checkouts.

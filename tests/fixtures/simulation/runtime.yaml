@@ -1,34 +1,39 @@
-schema_version: runtime-manifest.v2
+---
+schema_version: runtime-manifest.v1
 runtime_id: org.example.physics-smoke
-generated_at: "2026-07-13T10:00:00Z"
-oci_image:
-  reference: ghcr.io/example/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-  digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+generated_at: '2026-07-13T10:00:00Z'
 components:
   contracts_revision: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
   harness_revision: cccccccccccccccccccccccccccccccccccccccc
   infra_revision: dddddddddddddddddddddddddddddddddddddddd
-host:
+host_platform:
   os: windows-wsl2
-  os_version: "11"
+  os_version: '11'
+  architecture: x86_64
+  kernel: 6.6.87.2-microsoft-standard-WSL2
+execution_platform:
+  os: ubuntu
+  os_version: '24.04'
   architecture: x86_64
   kernel: 6.6.87.2-microsoft-standard-WSL2
 ros:
   distribution: jazzy
   rmw_implementation: rmw_fastrtps_cpp
-gazebo:
-  collection: harmonic
-  version: 8.10.0
-  libraries: {gz-sim: 8.10.0}
-render: {mode: software, renderer: llvmpipe}
-workload: {kind: none}
+  rmw_version: 0.0.0-fixture
+  domain_id: 42
+render:
+  mode: software
+  renderer: llvmpipe
+workload:
+  kind: none
 execution:
   target_environment: simulation
-  data_source: gazebo
-  plant_backend: gazebo_physics
+  data_source: simulator
+  plant_backend: simulated_physics
   time_mode: simulation_realtime
   data_plane_profile: standard_isolated
-authorization: {mode: none}
+authorization:
+  mode: none
 data_plane:
   rmw_implementation: rmw_fastrtps_cpp
   ipc_namespace: container:simulation
@@ -36,7 +41,31 @@ data_plane:
   shm_transport: false
   data_sharing: false
   private_ipc: false
-security: {profile: none, strategy: none, enclaves: [], policy_digests: []}
+security:
+  profile: none
+  strategy: none
+  enclaves: []
+  policy_digests: []
 lifecycle_states: []
 physical_targets: []
-clock: {basis: ros_time, sync_protocol: sim_clock, offset_ms: 0, drift_ppm: 0}
+clock:
+  basis: ros_time
+  sync_protocol: sim_clock
+  offset_ms: 0
+  drift_ppm: 0
+execution_subject:
+  kind: oci_image
+  locator: oci://ghcr.io/example/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+provider_bindings:
+  - target_id: simulation-primary
+    provider:
+      kind: simulator
+      implementation_id: gz_sim
+      version: 8.10.0
+      configuration_sha256: '1111111111111111111111111111111111111111111111111111111111111111'
+    qualification_profile_sha256: '2222222222222222222222222222222222222222222222222222222222222222'
+    conformance_result_sha256: '3333333333333333333333333333333333333333333333333333333333333333'
+    capabilities:
+      - simulated_physics
+evaluator_bindings: []

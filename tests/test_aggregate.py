@@ -26,7 +26,7 @@ from robotics_acceptance_harness.result import (
 from robotics_acceptance_harness.time_authority import TimeAuthorityObservation
 from robotics_acceptance_harness.timing import TimingObservation
 from robotics_acceptance_harness.traces import TraceInputError
-from tests.support import acceptance_run, local_evidence_segment, write_evidence_index
+from tests.support import acceptance_run, local_evidence_artifact, write_evidence_index
 
 FIXTURES = Path(__file__).parent / "fixtures" / "simulation"
 RUN_ID = "run-01234567-89ab-4def-8123-456789abcdef"
@@ -41,7 +41,7 @@ def write_json(path: Path, value: object) -> Path:
 
 def transport_scenario(tmp_path: Path) -> Path:
     scenario = yaml.safe_load((FIXTURES / "scenario.yaml").read_text(encoding="utf-8"))
-    scenario["schema_version"] = "acceptance-scenario.v5"
+    scenario["schema_version"] = "acceptance-scenario.v1"
     scenario["metric_definitions"] = []
     scenario["time_policy"]["cross_domain_clock"] = {
         "method": "measured_skew",
@@ -98,14 +98,14 @@ def result(
         tmp_path / f"metrics-{suffix}.json",
         {"domain_id": domain_id},
     )
-    segment = local_evidence_segment(
+    artifact = local_evidence_artifact(
         evidence_payload_path,
         media_type="application/x-ndjson",
     )
     evidence_path = write_evidence_index(
         tmp_path / f"evidence-{suffix}.json",
         run_id=RUN_ID,
-        segments=[segment],
+        artifacts=[artifact],
         recording_mode="bounded",
     )
     document = build_acceptance_result(
@@ -125,7 +125,7 @@ def result(
             0,
             time_authority_within_policy,
         ),
-        time_authority_evidence_sha256=segment["sha256"],
+        time_authority_evidence_sha256=artifact["sha256"],
         assertions=(
             AssertionEvaluation(
                 assertion_id="domain-smoke",
@@ -275,18 +275,17 @@ def trace_evidence_index(
         tmp_path / f"{domain_id}.evidence.json",
         run_id=RUN_ID,
         recording_mode="bounded",
-        schema_version="evidence-index.v3",
-        segments=[
-            local_evidence_segment(
+        artifacts=[
+            local_evidence_artifact(
                 trace_path,
                 media_type="application/x-ndjson",
-                segment_index=900000,
+                artifact_index=900000,
             ),
             *(
-                local_evidence_segment(
+                local_evidence_artifact(
                     path,
                     media_type="application/json",
-                    segment_index=900001 + index,
+                    artifact_index=900001 + index,
                 )
                 for index, path in enumerate(extra_paths)
             ),
@@ -298,7 +297,7 @@ def channel_contract(tmp_path: Path, relationship: str = "link") -> Path:
     return write_json(
         tmp_path / "channel.json",
         {
-            "schema_version": "zenoh-channel.v1",
+            "schema_version": "transport-channel.v1",
             "channel_id": "sensor.control",
             "source": {
                 "domain_id": "camera-domain",
@@ -314,12 +313,14 @@ def channel_contract(tmp_path: Path, relationship: str = "link") -> Path:
                 "message_type": "example_interfaces/msg/String",
                 "type_hash": TYPE_HASH,
             },
-            "bridge": {
-                "implementation": "zenoh-bridge-ros2dds",
+            "implementation_binding": {
+                "implementation_id": "reference-bridge",
                 "version": "1.9.0",
                 "configuration_sha256": "2" * 64,
-                "dds_discovery_scope": "local_domain_only",
-                "zenoh_key_expression": "robotics/observations",
+                "options": {
+                    "discovery_scope": "local_domain_only",
+                    "route": "robotics/observations",
+                },
             },
             "qos": {
                 "reliability": "reliable",
@@ -446,7 +447,7 @@ def transport_aggregate_inputs(
     scenario = yaml.safe_load(scenario_path.read_text(encoding="utf-8"))
     scenario_sha256 = hashlib.sha256(scenario_path.read_bytes()).hexdigest()
     context_path = write_json(
-        tmp_path / "acceptance-run-v5.json",
+        tmp_path / "acceptance-run.json",
         acceptance_run(
             run_id=RUN_ID,
             scenario_id=scenario["scenario_id"],
@@ -497,7 +498,7 @@ def test_aggregate_references_transport_qualification(tmp_path: Path) -> None:
 
     aggregate = json.loads(output.read_text(encoding="utf-8"))
     reference = aggregate["cross_domain_e2e"]["transport_qualification"]
-    assert aggregate["schema_version"] == "acceptance-aggregate.v4"
+    assert aggregate["schema_version"] == "acceptance-aggregate.v1"
     assert aggregate["cross_domain_e2e"]["status"] == "passed"
     assert reference["status"] == "passed"
     assert reference["result_sha256"] == hashlib.sha256(qualification_path.read_bytes()).hexdigest()
@@ -584,9 +585,6 @@ def test_aggregate_rejects_transport_for_another_run(tmp_path: Path) -> None:
     transport_qualification(tmp_path, relationship="link", consumer_link=2)
     qualification_path = tmp_path / "transport-qualification.json"
     qualification = json.loads(qualification_path.read_text(encoding="utf-8"))
-    qualification["schema_version"] = "transport-qualification-result.v1"
-    qualification.pop("scenario_sha256")
-    qualification.pop("clock_relations")
     qualification["run_id"] = "run-01234567-89ab-4def-8123-456789abcdea"
     write_json(qualification_path, qualification)
 
@@ -600,27 +598,6 @@ def test_aggregate_rejects_transport_for_another_run(tmp_path: Path) -> None:
             ],
             transport_qualification_path=qualification_path,
             output_path=tmp_path / "aggregate.json",
-        )
-
-
-def test_aggregate_rejects_transport_v1_for_scenario_v5(tmp_path: Path) -> None:
-    scenario_path = transport_scenario(tmp_path)
-    context_path, results = transport_aggregate_inputs(tmp_path, scenario_path)
-    transport_qualification(tmp_path, relationship="link", consumer_link=2)
-    qualification_path = tmp_path / "transport-qualification.json"
-    qualification = json.loads(qualification_path.read_text(encoding="utf-8"))
-    qualification["schema_version"] = "transport-qualification-result.v1"
-    qualification.pop("clock_relations")
-    qualification.pop("scenario_sha256")
-    write_json(qualification_path, qualification)
-
-    with pytest.raises(BundleValidationError, match="requires transport-qualification-result.v2"):
-        aggregate_results(
-            scenario_path=scenario_path,
-            run_context_path=context_path,
-            result_paths=results,
-            transport_qualification_path=qualification_path,
-            output_path=tmp_path / "aggregate-v5.json",
         )
 
 
@@ -638,7 +615,7 @@ def test_aggregate_rejects_transport_for_another_scenario(tmp_path: Path) -> Non
             run_context_path=context_path,
             result_paths=results,
             transport_qualification_path=tmp_path / "transport-qualification.json",
-            output_path=tmp_path / "aggregate-v5.json",
+            output_path=tmp_path / "aggregate.json",
         )
 
 
@@ -772,7 +749,7 @@ def test_transport_qualification_proves_span_link(tmp_path: Path) -> None:
         consumer_link=2,
     )
 
-    assert result["schema_version"] == "transport-qualification-result.v2"
+    assert result["schema_version"] == "transport-qualification-result.v1"
     assert result["verdict"]["status"] == "passed"
     assert result["causal_chains"][0]["root_trace_id"] == TRACE_ID
     assert result["causal_chains"][0]["hops"][0]["relationship"] == "link"
@@ -816,11 +793,11 @@ def test_transport_qualification_binds_cross_domain_clock_relation(tmp_path: Pat
         },
         clock_relation_paths=(relation,),
         observation_output_dir=tmp_path / "transport-observations",
-        output_path=tmp_path / "transport-qualification-v2.json",
+        output_path=tmp_path / "transport-qualification-updated.json",
     )
     document = json.loads(output.read_text(encoding="utf-8"))
 
-    assert document["schema_version"] == "transport-qualification-result.v2"
+    assert document["schema_version"] == "transport-qualification-result.v1"
     assert document["clock_relations"][0]["status"] == "passed"
 
 
@@ -849,7 +826,7 @@ def test_transport_qualification_is_incomplete_without_clock_relation(
             "control-domain": trace_evidence_index(tmp_path, "control-domain", consumer),
         },
         observation_output_dir=tmp_path / "transport-observations",
-        output_path=tmp_path / "transport-qualification-v2.json",
+        output_path=tmp_path / "transport-qualification-updated.json",
     )
     document = json.loads(output.read_text(encoding="utf-8"))
 

@@ -21,8 +21,8 @@ from robotics_acceptance_harness.timing import ClockSample
 from tests.support import (
     FakeTime,
     acceptance_run,
-    local_evidence_segment,
-    local_mcap_segment,
+    local_evidence_artifact,
+    local_recording_artifact,
     write_evidence_index,
 )
 
@@ -350,18 +350,19 @@ def _write_evidence(
 ) -> Path:
     retention = "hil-30d" if physical else "pull-request-7d"
     topics = {} if physical else {"/clock": "rosgraph_msgs/msg/Clock"}
-    segments = [
-        local_mcap_segment(
+    artifacts = [
+        local_recording_artifact(
             path.with_suffix(".mcap"),
             topics=topics,
             retention_class=retention,
         )
     ]
     if include_metrics:
-        segments.append(
-            local_evidence_segment(
+        artifacts.append(
+            local_evidence_artifact(
                 metrics_path,
-                segment_index=1,
+                media_type="application/x-ndjson",
+                artifact_index=1,
                 retention_class=retention,
             )
         )
@@ -370,7 +371,7 @@ def _write_evidence(
         run_id=run_id,
         recording_mode="bounded" if physical else "on_failure",
         upload_mode="closed_segments_during_run" if physical else "local_only",
-        segments=segments,
+        artifacts=artifacts,
     )
 
 
@@ -638,7 +639,7 @@ def test_verification_rejects_a_stale_measurement_marker_before_observation(
 
 
 def test_verification_requires_metrics_to_be_verified_evidence(tmp_path: Path) -> None:
-    with pytest.raises(VerificationError, match="verified local application/json"):
+    with pytest.raises(VerificationError, match="verified local application/x-ndjson"):
         _simulation_case(tmp_path, include_metrics=False)
 
 
@@ -679,7 +680,7 @@ def test_physical_verification_emits_authorized_result(tmp_path: Path) -> None:
     outputs, observer = _physical_case(tmp_path)
     result = outputs.result
 
-    assert result["schema_version"] == "acceptance-result.v5"
+    assert result["schema_version"] == "acceptance-result.v1"
     assert result["evaluation_mode"] == "live"
     assert result["status"] == "passed"
     assert result["authorization"]["mode"] == "verified_execution_permit"

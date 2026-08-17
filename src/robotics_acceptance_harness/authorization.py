@@ -90,9 +90,9 @@ def evaluate_physical_authorization(
     )
     _equal(
         issues,
-        "$.permit.image_digest",
-        runtime["oci_image"]["digest"],
-        permit["image_digest"],
+        "$.permit.subject_digest",
+        runtime["execution_subject"]["digest"],
+        permit["subject_digest"],
     )
     _equal(
         issues,

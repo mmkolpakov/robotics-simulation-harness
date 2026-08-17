@@ -47,7 +47,7 @@ def test_doctor_rejects_module_with_broken_native_import(monkeypatch) -> None:
     assert "native extension is unavailable" in check["message"]
 
 
-def test_doctor_rejects_an_unloadable_evaluator(monkeypatch) -> None:
+def test_doctor_does_not_import_evaluator_targets(monkeypatch) -> None:
     entry_point = EntryPoint(
         "org.example.broken",
         "missing_evaluator_package:evaluate",
@@ -60,9 +60,9 @@ def test_doctor_rejects_an_unloadable_evaluator(monkeypatch) -> None:
 
     report = doctor_report()
 
-    discovery = next(item for item in report["checks"] if item["check_id"] == "evaluator-discovery")
+    discovery = next(item for item in report["checks"] if item["check_id"] == "evaluator-metadata")
     assert discovery["status"] == "failed"
-    assert "cannot load evaluator" in discovery["message"]
+    assert report["evaluators"][0]["target"] == "missing_evaluator_package:evaluate"
 
 
 def test_why_reports_failed_runtime_observations(tmp_path: Path) -> None:

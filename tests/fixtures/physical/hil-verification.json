@@ -1,36 +1,36 @@
 {
-  "schema_version": "execution-verification.v1",
-  "verification_id": "org.example.hil-verification-001",
-  "permit_sha256": "80eb07e5a0f5545197125d07d97481cd2865fd67f3c7757342e3917b86d74314",
-  "statement_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
-  "policy_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
-  "trust_policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-  "target": {
-    "environment": "hil",
-    "target_id": "controller-alpha",
-    "identity_kind": "mavlink_system_component",
-    "identity_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-  },
-  "verified_at": "2026-07-12T09:56:00Z",
+  "cosign_subject_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
   "cosign_version": "3.0.6",
-  "cosign_image_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+  "decision": "allow",
+  "permit_sha256": "407a59cbd730247a873117066239440c6128b724bee8d6d60ca4db41c80dfa58",
+  "policy_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+  "schema_version": "execution-verification.v1",
   "signers": [
     {
-      "role": "operator",
-      "identity": "operator@example.org",
-      "issuer": "https://token.actions.githubusercontent.com",
       "bundle_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+      "identity": "operator@example.org",
       "integrated_time": 1783846500,
+      "issuer": "https://token.actions.githubusercontent.com",
+      "role": "operator",
       "transparency_log_verified": true
     },
     {
-      "role": "approver",
-      "identity": "safety@example.org",
-      "issuer": "https://token.actions.githubusercontent.com",
       "bundle_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+      "identity": "safety@example.org",
       "integrated_time": 1783846520,
+      "issuer": "https://token.actions.githubusercontent.com",
+      "role": "approver",
       "transparency_log_verified": true
     }
   ],
-  "decision": "allow"
+  "statement_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+  "target": {
+    "environment": "hil",
+    "identity_kind": "mavlink_system_component",
+    "identity_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "target_id": "controller-alpha"
+  },
+  "trust_policy_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "verification_id": "org.example.hil-verification-001",
+  "verified_at": "2026-07-12T09:56:00Z"
 }

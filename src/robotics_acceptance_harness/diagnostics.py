@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import platform
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from importlib import import_module
 from importlib.metadata import version
 from pathlib import Path
@@ -11,7 +11,8 @@ from typing import Any
 
 from robotics_acceptance_harness import __version__
 from robotics_acceptance_harness.documents import load_document
-from robotics_acceptance_harness.evaluation import EvaluationError, evaluator_inventory
+from robotics_acceptance_harness.evaluation import evaluator_inventory
+from robotics_acceptance_harness.receipts import VerifiedReceiptSet
 
 
 def _check(check_id: str, passed: bool, message: str) -> dict[str, str]:
@@ -35,6 +36,8 @@ def doctor_report(
     mode: str = "offline",
     evidence_dir: str | Path | None = None,
     measurement_complete: str | Path | None = None,
+    evaluator_requirements: Sequence[Mapping[str, Any]] = (),
+    evaluator_receipts: VerifiedReceiptSet | None = None,
 ) -> dict[str, Any]:
     """Check dependencies required by the selected evaluation mode."""
 
@@ -42,11 +45,27 @@ def doctor_report(
         raise ValueError(f"unsupported doctor mode: {mode}")
     checks = [_check("contracts-package", True, "robotics-runtime-contracts is importable")]
     try:
-        inventory = list(evaluator_inventory())
-        checks.append(_check("evaluator-discovery", True, "evaluator entry points are loadable"))
-    except EvaluationError as error:
+        inventory = list(evaluator_inventory(evaluator_requirements, evaluator_receipts))
+        namespaces = [str(item["namespace"]) for item in inventory]
+        metadata_ready = len(namespaces) == len(set(namespaces)) and all(
+            item["distribution"] != "unknown" and item["version"] != "unknown" for item in inventory
+        )
+        expected_count = len(evaluator_requirements)
+        qualified = not evaluator_requirements or len(inventory) == expected_count
+        checks.append(
+            _check(
+                "evaluator-metadata",
+                metadata_ready and qualified,
+                (
+                    f"qualified {len(inventory)} required evaluator(s)"
+                    if evaluator_requirements
+                    else f"discovered {len(inventory)} evaluator(s) with valid metadata"
+                ),
+            )
+        )
+    except ValueError as error:
         inventory = []
-        checks.append(_check("evaluator-discovery", False, str(error)))
+        checks.append(_check("evaluator-metadata", False, str(error)))
     if mode == "live":
         for module in ("rclpy", "rosidl_runtime_py", "lifecycle_msgs", "rosgraph_msgs"):
             import_error = _module_import_error(module)
@@ -108,7 +127,7 @@ def why_report(path: str | Path) -> dict[str, Any]:
 
     result = load_document(
         path,
-        expected_schemas={"acceptance-result.v4", "acceptance-result.v5"},
+        expected_role="acceptance_result",
     )
     assertions = [
         {

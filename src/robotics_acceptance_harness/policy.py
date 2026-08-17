@@ -50,12 +50,13 @@ def evaluate_data_plane_policy(
         )
         for field in ("shm_transport", "data_sharing", "private_ipc")
     ]
-    if "fastdds_profile_sha256" in policy:
+    if "middleware_configuration_sha256" in policy:
         evaluations.append(
             _boolean_evaluation(
-                "data-plane-fastdds-profile",
-                observed.get("fastdds_profile_sha256") == policy["fastdds_profile_sha256"],
-                "Fast DDS profile digest differs",
+                "data-plane-middleware-configuration",
+                observed.get("middleware_configuration_sha256")
+                == policy["middleware_configuration_sha256"],
+                "middleware configuration digest differs",
             )
         )
     try:
@@ -233,11 +234,11 @@ def evaluate_evidence_policy(
     policy: Mapping[str, Any],
     evidence: VerifiedEvidence,
 ) -> tuple[AssertionEvaluation, ...]:
-    """Evaluate recording coverage and bounded-storage policy from v2 evidence."""
+    """Evaluate recording coverage and bounded-storage policy."""
 
     observation = evidence.index.data["policy_observation"]
-    segments = evidence.index.data["segments"]
-    summaries = evidence.mcap_summaries
+    artifacts = evidence.index.data["artifacts"]
+    summaries = evidence.recording_summaries
     channels = {
         channel["topic"]
         for summary in summaries
@@ -256,10 +257,13 @@ def evaluate_evidence_policy(
     compressions = {
         compression for summary in summaries for compression in summary.data["compressions"]
     }
-    max_segment_size = max((segment["size_bytes"] for segment in segments), default=0)
+    max_segment_size = max(
+        (artifact["size_bytes"] for artifact in artifacts if artifact["kind"] == "recording"),
+        default=0,
+    )
     max_segment_duration = max(durations_sec, default=0.0)
-    retention_classes = {segment["retention_class"] for segment in segments}
-    expected_remote = policy["upload_mode"] == "closed_segments_during_run"
+    retention_classes = {artifact["retention_class"] for artifact in artifacts}
+    expected_remote = policy["upload_mode"] != "local_only"
     spool_ratio = observation["spool_peak_size_bytes"] / policy["max_spool_size_bytes"]
     checks = (
         (

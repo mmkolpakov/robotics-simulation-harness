@@ -9,16 +9,15 @@ from uuid import uuid4
 
 from robotics_runtime_contracts import (
     ClockEvidenceValidationError,
-    SchemaCompatibilityError,
     validate_clock_relation_evidence,
-    validate_companion_schema,
+    worst_status,
 )
 
 from robotics_acceptance_harness import __version__
 from robotics_acceptance_harness.documents import BundleValidationError, load_document
 from robotics_acceptance_harness.evidence import load_evidence_index
+from robotics_acceptance_harness.otel import OTLP_JSON_LINES_MEDIA_TYPE
 from robotics_acceptance_harness.result import format_utc_datetime, write_contract_json
-from robotics_acceptance_harness.status import worst_status
 from robotics_acceptance_harness.timing import utc_datetime_from_unix_ns
 from robotics_acceptance_harness.traces import (
     CausalHop,
@@ -45,11 +44,11 @@ def aggregate_results(
 
     scenario = load_document(
         scenario_path,
-        expected_schemas={"acceptance-scenario.v4", "acceptance-scenario.v5"},
+        expected_role="acceptance_scenario",
         extension_schemas=extension_schemas,
     )
     context_path = Path(run_context_path).expanduser().resolve()
-    context = load_document(context_path, expected_schemas={"acceptance-run.v1"})
+    context = load_document(context_path, expected_role="acceptance_run")
     if (
         context.data["scenario_id"] != scenario.data["scenario_id"]
         or context.data["scenario_sha256"] != scenario.sha256
@@ -62,7 +61,7 @@ def aggregate_results(
     results = [
         load_document(
             path,
-            expected_schemas={"acceptance-result.v4", "acceptance-result.v5"},
+            expected_role="acceptance_result",
         )
         for path in resolved_result_paths
     ]
@@ -74,29 +73,11 @@ def aggregate_results(
     qualification = (
         load_document(
             qualification_path,
-            expected_schemas={
-                "transport-qualification-result.v1",
-                "transport-qualification-result.v2",
-            },
+            expected_role="transport_qualification_result",
         )
         if qualification_path is not None
         else None
     )
-    try:
-        for result in results:
-            validate_companion_schema(
-                scenario.schema_version,
-                "domain_result",
-                result.schema_version,
-            )
-        if qualification is not None:
-            validate_companion_schema(
-                scenario.schema_version,
-                "transport_qualification",
-                qualification.schema_version,
-            )
-    except SchemaCompatibilityError as error:
-        raise BundleValidationError("$.schema_version", str(error)) from error
     expected_domains = {item["domain_id"] for item in context.data["domains"]}
     observed_domains = {item.data["domain_id"] for item in results}
     if observed_domains != expected_domains:
@@ -141,10 +122,7 @@ def aggregate_results(
                 "$.transport_qualification.run_id",
                 "transport qualification belongs to another run",
             )
-        if (
-            qualification.schema_version == "transport-qualification-result.v2"
-            and qualification.data["scenario_sha256"] != scenario.sha256
-        ):
+        if qualification.data["scenario_sha256"] != scenario.sha256:
             raise BundleValidationError(
                 "$.transport_qualification.scenario_sha256",
                 "transport qualification belongs to another scenario",
@@ -168,7 +146,7 @@ def aggregate_results(
             },
         }
     aggregate: dict[str, Any] = {
-        "schema_version": "acceptance-aggregate.v4",
+        "schema_version": "acceptance-aggregate.v1",
         "aggregate_id": aggregate_id or f"aggregate-{uuid4()}",
         "run_id": context.data["run_id"],
         "acceptance_run_sha256": context.sha256,
@@ -218,7 +196,8 @@ def _trace_link(
     return {
         "domain_id": domain_id,
         "evidence_index_sha256": verified_index_sha256,
-        "segment_index": link["segment_index"],
+        "artifact_id": link["artifact_id"],
+        **({"segment_index": link["segment_index"]} if "segment_index" in link else {}),
         "uri": link["uri"],
         "media_type": link["media_type"],
         "format": "otlp-jsonl",
@@ -276,6 +255,9 @@ def evaluate_transport_qualification(
     channel_contract_paths: Sequence[str | Path],
     trace_paths: Mapping[str, str | Path],
     evidence_index_paths: Mapping[str, str | Path],
+    artifact_receipt_paths: Mapping[str, Sequence[str | Path]] | None = None,
+    artifact_verification_paths: Mapping[str, Sequence[str | Path]] | None = None,
+    receipt_dependency_paths: Mapping[str, Sequence[str | Path]] | None = None,
     clock_relation_paths: Sequence[str | Path] = (),
     observation_output_dir: str | Path,
     output_path: str | Path,
@@ -288,7 +270,7 @@ def evaluate_transport_qualification(
     evaluated_at = generated_at or datetime.now(UTC)
     scenario = load_document(
         scenario_path,
-        expected_schemas={"acceptance-scenario.v5"},
+        expected_role="acceptance_scenario",
         extension_schemas=extension_schemas,
     )
     clock_policy = scenario.data["time_policy"].get("cross_domain_clock")
@@ -303,7 +285,7 @@ def evaluate_transport_qualification(
             "at least one causal-chain contract is required",
         )
     chain_contracts = [
-        load_document(path, expected_schemas={"causal-chain.v1"}) for path in causal_chain_paths
+        load_document(path, expected_role="causal_chain") for path in causal_chain_paths
     ]
     chain_ids = [str(item.data["chain_id"]) for item in chain_contracts]
     if len(chain_ids) != len(set(chain_ids)):
@@ -320,8 +302,7 @@ def evaluate_transport_qualification(
         )
 
     channel_contracts = [
-        load_document(path, expected_schemas={"zenoh-channel.v1"})
-        for path in channel_contract_paths
+        load_document(path, expected_role="transport_channel") for path in channel_contract_paths
     ]
     channel_ids = [str(item.data["channel_id"]) for item in channel_contracts]
     if len(channel_ids) != len(set(channel_ids)):
@@ -391,15 +372,17 @@ def evaluate_transport_qualification(
         verified = load_evidence_index(
             evidence_index_paths[domain_id],
             expected_run_id=run_id,
-            scenario_schema=scenario.schema_version,
+            receipt_paths=(artifact_receipt_paths or {}).get(domain_id, ()),
+            verification_paths=(artifact_verification_paths or {}).get(domain_id, ()),
+            receipt_dependency_paths=(receipt_dependency_paths or {}).get(domain_id, ()),
         )
         verified_by_domain[domain_id] = verified
         trace_path = Path(trace_paths[domain_id]).expanduser().resolve()
         link = verified.local_files.get(trace_path)
-        if link is None or link["media_type"] != "application/x-ndjson":
+        if link is None or link["media_type"] != OTLP_JSON_LINES_MEDIA_TYPE:
             raise BundleValidationError(
                 f"$.trace_evidence.{domain_id}",
-                "trace file must be verified local application/x-ndjson evidence",
+                f"trace file must be verified local {OTLP_JSON_LINES_MEDIA_TYPE} evidence",
             )
         trace_evidence.append(
             _trace_link(
@@ -417,7 +400,7 @@ def evaluate_transport_qualification(
     validate_trace_set(spans_by_domain)
 
     clock_relations = [
-        load_document(path, expected_schemas={"clock-relation.v1"}) for path in clock_relation_paths
+        load_document(path, expected_role="clock_relation") for path in clock_relation_paths
     ]
     clock_relation_references: list[dict[str, Any]] = []
     clock_statuses: set[str] = set()
@@ -501,7 +484,7 @@ def evaluate_transport_qualification(
                 seconds=float(contract.data["delivery"]["observation_window_sec"])
             )
         observation_document = {
-            "schema_version": "zenoh-channel-observation.v1",
+            "schema_version": "transport-channel-observation.v1",
             "observation_id": f"observation-{uuid4()}",
             "run_id": run_id,
             "channel_id": channel_id,
@@ -607,7 +590,7 @@ def evaluate_transport_qualification(
     }
 
     result: dict[str, Any] = {
-        "schema_version": "transport-qualification-result.v2",
+        "schema_version": "transport-qualification-result.v1",
         "qualification_id": qualification_id or f"qualification-{uuid4()}",
         "run_id": run_id,
         "scenario_sha256": scenario.sha256,

@@ -25,13 +25,18 @@ from robotics_acceptance_harness.metrics import (
     MetricPoint,
     MetricSample,
 )
-from robotics_acceptance_harness.otel import load_otlp_json_metrics
+from robotics_acceptance_harness.otel import (
+    OTLP_JSON_LINES_MEDIA_TYPE,
+    load_otlp_json_metrics,
+    select_metric_points,
+)
 from robotics_acceptance_harness.readiness import (
     GraphObserver,
     GraphSnapshot,
     ReadinessResult,
     wait_for_readiness,
 )
+from robotics_acceptance_harness.receipts import VerifiedReceiptSet
 from robotics_acceptance_harness.result import (
     build_acceptance_result,
     write_contract_json,
@@ -73,20 +78,6 @@ class VerificationOutputs:
 
 def _utc_now() -> datetime:
     return datetime.now(UTC)
-
-
-def _run_domain_metrics(
-    samples: Sequence[MetricPoint],
-    *,
-    run_id: str,
-    domain_id: str,
-) -> tuple[MetricPoint, ...]:
-    return tuple(
-        sample
-        for sample in samples
-        if sample.attributes.get("run.id") == run_id
-        and sample.attributes.get("domain.id") == domain_id
-    )
 
 
 def explain_bundle(bundle: DocumentBundle) -> dict[str, Any]:
@@ -185,7 +176,9 @@ def _wait_for_evidence(
     path: str | Path,
     *,
     run_id: str,
-    scenario_schema: str,
+    receipt_paths: Sequence[str | Path],
+    verification_paths: Sequence[str | Path],
+    receipt_dependency_paths: Sequence[str | Path],
     timeout_sec: float,
     poll_interval_sec: float,
     now_ns: Callable[[], int],
@@ -201,7 +194,9 @@ def _wait_for_evidence(
     return load_evidence_index(
         source,
         expected_run_id=run_id,
-        scenario_schema=scenario_schema,
+        receipt_paths=receipt_paths,
+        verification_paths=verification_paths,
+        receipt_dependency_paths=receipt_dependency_paths,
     )
 
 
@@ -212,6 +207,10 @@ def run_verification(
     domain_id: str,
     run_context_path: str | Path,
     evidence_index_path: str | Path,
+    artifact_receipt_paths: Sequence[str | Path] = (),
+    artifact_verification_paths: Sequence[str | Path] = (),
+    receipt_dependency_paths: Sequence[str | Path] = (),
+    evaluator_receipts: VerifiedReceiptSet | None = None,
     otel_metrics_path: str | Path,
     measurement_complete_path: str | Path,
     output_dir: str | Path,
@@ -318,7 +317,9 @@ def run_verification(
     evidence = _wait_for_evidence(
         evidence_index_path,
         run_id=run_id,
-        scenario_schema=bundle.scenario.schema_version,
+        receipt_paths=artifact_receipt_paths,
+        verification_paths=artifact_verification_paths,
+        receipt_dependency_paths=receipt_dependency_paths,
         timeout_sec=float(scenario["timeouts"]["shutdown_sec"]),
         poll_interval_sec=poll_interval_sec,
         now_ns=now_ns,
@@ -326,12 +327,12 @@ def run_verification(
     )
     metrics_path = Path(otel_metrics_path).expanduser().resolve()
     metric_link = evidence.local_files.get(metrics_path)
-    if metric_link is None or metric_link["media_type"] != "application/json":
+    if metric_link is None or metric_link["media_type"] != OTLP_JSON_LINES_MEDIA_TYPE:
         raise VerificationError(
-            "OTLP metrics must be a verified local application/json evidence segment"
+            f"OTLP metrics must be verified local {OTLP_JSON_LINES_MEDIA_TYPE} evidence"
         )
     metrics_evidence_sha256 = str(metric_link["sha256"])
-    metric_samples = _run_domain_metrics(
+    metric_samples = select_metric_points(
         load_otlp_json_metrics(
             metrics_path,
             expected_sha256=metrics_evidence_sha256,
@@ -392,7 +393,8 @@ def run_verification(
                 metric_samples=metric_samples,
                 window_start_ns=measurement_started_ns,
                 window_end_ns=measurement_finished_ns,
-            )
+            ),
+            evaluator_receipts=evaluator_receipts,
         )
     )
     if timing_failure is not None:
@@ -452,6 +454,10 @@ def evaluate_from_evidence(
     domain_id: str,
     run_context_path: str | Path,
     evidence_index_path: str | Path,
+    artifact_receipt_paths: Sequence[str | Path] = (),
+    artifact_verification_paths: Sequence[str | Path] = (),
+    receipt_dependency_paths: Sequence[str | Path] = (),
+    evaluator_receipts: VerifiedReceiptSet | None = None,
     otel_metrics_path: str | Path,
     window_start_ns: int,
     window_end_ns: int,
@@ -471,16 +477,18 @@ def evaluate_from_evidence(
     evidence = load_evidence_index(
         evidence_index_path,
         expected_run_id=run_id,
-        scenario_schema=bundle.scenario.schema_version,
+        receipt_paths=artifact_receipt_paths,
+        verification_paths=artifact_verification_paths,
+        receipt_dependency_paths=receipt_dependency_paths,
     )
     metrics_path = Path(otel_metrics_path).expanduser().resolve()
     metric_link = evidence.local_files.get(metrics_path)
-    if metric_link is None or metric_link["media_type"] != "application/json":
+    if metric_link is None or metric_link["media_type"] != OTLP_JSON_LINES_MEDIA_TYPE:
         raise VerificationError(
-            "OTLP metrics must be a verified local application/json evidence segment"
+            f"OTLP metrics must be verified local {OTLP_JSON_LINES_MEDIA_TYPE} evidence"
         )
     metric_samples = _measurement_metrics(
-        _run_domain_metrics(
+        select_metric_points(
             load_otlp_json_metrics(
                 metrics_path,
                 expected_sha256=str(metric_link["sha256"]),
@@ -500,7 +508,8 @@ def evaluate_from_evidence(
             metric_samples=metric_samples,
             window_start_ns=window_start_ns,
             window_end_ns=window_end_ns,
-        )
+        ),
+        evaluator_receipts=evaluator_receipts,
     )
     time_authority = evaluate_time_authority(
         bundle.scenario_data["time_policy"],

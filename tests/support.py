@@ -73,11 +73,11 @@ def acceptance_run(
     }
 
 
-def local_evidence_segment(
+def local_evidence_artifact(
     path: Path,
     *,
     media_type: str = "application/json",
-    segment_index: int = 0,
+    artifact_index: int = 0,
     retention_class: str = "pull-request-7d",
     overrides: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -85,22 +85,23 @@ def local_evidence_segment(
     local_path = resolved.as_posix()
     if os_name == "nt":
         local_path = f"/{local_path}"
-    segment = {
+    artifact = {
+        "artifact_id": f"artifact-{artifact_index}",
+        "kind": "observation",
         "uri": resolved.as_uri(),
         "local_path": local_path,
         "media_type": media_type,
         "sha256": sha256(resolved.read_bytes()).hexdigest(),
         "size_bytes": resolved.stat().st_size,
         "retention_class": retention_class,
-        "segment_index": segment_index,
-        "upload_status": "local",
-        "checksum_verified": True,
+        "segment_index": artifact_index,
+        "storage_state": "local",
     }
-    segment.update(overrides or {})
-    return segment
+    artifact.update(overrides or {})
+    return artifact
 
 
-def local_mcap_segment(
+def local_recording_artifact(
     path: Path,
     *,
     topics: Mapping[str, str],
@@ -108,17 +109,18 @@ def local_mcap_segment(
     retention_class: str = "pull-request-7d",
 ) -> dict[str, Any]:
     path.write_bytes(b"mcap")
-    segment = local_evidence_segment(
+    artifact = local_evidence_artifact(
         path,
         media_type="application/mcap",
         retention_class=retention_class,
+        overrides={"kind": "recording"},
     )
-    summary = path.with_suffix(".mcap-summary.json")
+    summary = path.with_suffix(".recording-summary.json")
     summary.write_text(
         json.dumps(
             {
-                "schema_version": "mcap-summary.v1",
-                "source_sha256": segment["sha256"],
+                "schema_version": "recording-summary.v1",
+                "source_sha256": artifact["sha256"],
                 "statistics": {
                     "message_count": len(topics),
                     "schema_count": len(topics),
@@ -145,37 +147,39 @@ def local_mcap_segment(
         + "\n",
         encoding="utf-8",
     )
-    segment["mcap_summary"] = {
+    artifact["recording_summary"] = {
         "uri": summary.resolve().as_uri(),
         "sha256": sha256(summary.read_bytes()).hexdigest(),
         "size_bytes": summary.stat().st_size,
-        "media_type": "application/vnd.robotics.mcap-summary.v1+json",
     }
-    return segment
+    return artifact
 
 
 def evidence_index(
     run_id: str,
-    segments: Sequence[Mapping[str, Any]],
+    artifacts: Sequence[Mapping[str, Any]],
     *,
     recording_mode: str = "on_failure",
     upload_mode: str = "local_only",
-    schema_version: str = "evidence-index.v2",
 ) -> dict[str, Any]:
+    retention_classes = {str(item["retention_class"]) for item in artifacts}
+    if len(retention_classes) != 1:
+        raise ValueError("evidence artifacts require one retention class")
     return {
-        "schema_version": schema_version,
+        "schema_version": "evidence-index.v1",
         "run_id": run_id,
         "generated_at": "2026-07-26T12:00:02Z",
         "finalized": True,
         "policy_observation": {
             "recording_mode": recording_mode,
             "compression": "zstd",
+            "retention_class": retention_classes.pop(),
             "upload_mode": upload_mode,
             "remote_sink_used": upload_mode != "local_only",
-            "spool_peak_size_bytes": sum(int(item["size_bytes"]) for item in segments),
+            "spool_peak_size_bytes": sum(int(item["size_bytes"]) for item in artifacts),
             "upload_lag_max_sec": 0,
         },
-        "segments": [dict(item) for item in segments],
+        "artifacts": [dict(item) for item in artifacts],
     }
 
 
@@ -183,22 +187,96 @@ def write_evidence_index(
     path: Path,
     *,
     run_id: str,
-    segments: Sequence[Mapping[str, Any]],
+    artifacts: Sequence[Mapping[str, Any]],
     recording_mode: str = "on_failure",
     upload_mode: str = "local_only",
-    schema_version: str = "evidence-index.v2",
 ) -> Path:
     path.write_text(
         yaml.safe_dump(
             evidence_index(
                 run_id,
-                segments,
+                artifacts,
                 recording_mode=recording_mode,
                 upload_mode=upload_mode,
-                schema_version=schema_version,
             ),
             sort_keys=False,
         ),
         encoding="utf-8",
     )
     return path
+
+
+def write_verified_receipt(
+    directory: Path,
+    artifact: Mapping[str, Any],
+    *,
+    stem: str = "artifact",
+    run_id: str | None = None,
+) -> dict[str, Any]:
+    """Create a complete fixture receipt and external verification chain."""
+
+    def write_json(path: Path, value: Mapping[str, Any]) -> str:
+        path.write_text(json.dumps(value, sort_keys=True) + "\n", encoding="utf-8")
+        return sha256(path.read_bytes()).hexdigest()
+
+    statement_path = directory / f"{stem}-statement.json"
+    statement_sha256 = write_json(
+        statement_path,
+        {"artifact_sha256": artifact["sha256"], "predicate_type": "fixture-build"},
+    )
+    trust_path = directory / f"{stem}-trust.json"
+    trust_sha256 = write_json(trust_path, {"issuer": "fixture", "subject": stem})
+    verification_evidence_path = directory / f"{stem}-verification.bundle"
+    verification_evidence_path.write_bytes(b"fixture verification bundle\n")
+    verification_evidence_sha256 = sha256(verification_evidence_path.read_bytes()).hexdigest()
+    producer = {
+        "identity": "https://github.com/example/fixture/.github/workflows/release.yml",
+        "implementation": "fixture-producer",
+    }
+    verification = {
+        "schema_version": "artifact-verification.v1",
+        "verification_id": f"{stem}-verification",
+        "statement_sha256": statement_sha256,
+        "artifact": {
+            field: artifact[field]
+            for field in ("uri", "sha256", "size_bytes", "media_type", "immutable_revision")
+        },
+        "producer_identity": producer["identity"],
+        "producer_implementation": producer["implementation"],
+        "trust_policy_sha256": trust_sha256,
+        "verification_evidence_sha256": verification_evidence_sha256,
+        "verifier": {
+            "identity": "fixture-verifier",
+            "implementation": "cosign",
+            "version": "3.0.5",
+        },
+        "verified_at": "2026-07-26T12:00:01Z",
+        "status": "passed",
+    }
+    verification_path = directory / f"{stem}-verification.json"
+    verification_sha256 = write_json(verification_path, verification)
+    receipt = {
+        "schema_version": "artifact-receipt.v1",
+        "receipt_id": f"{stem}-receipt",
+        "artifact": {
+            field: artifact[field]
+            for field in ("uri", "sha256", "size_bytes", "media_type", "immutable_revision")
+        },
+        "producer": producer,
+        "created_at": "2026-07-26T12:00:02Z",
+        "statement_sha256": statement_sha256,
+        "verification_sha256": verification_sha256,
+        **({"run_id": run_id} if run_id is not None else {}),
+    }
+    receipt_path = directory / f"{stem}-receipt.json"
+    receipt_sha256 = write_json(receipt_path, receipt)
+    return {
+        "receipt": receipt_path,
+        "receipt_sha256": receipt_sha256,
+        "verification": verification_path,
+        "dependencies": (
+            statement_path,
+            trust_path,
+            verification_evidence_path,
+        ),
+    }

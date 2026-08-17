@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from robotics_acceptance_harness.cli import main
+from robotics_acceptance_harness.hardware_timing import HardwareTimingObservation
 from tests.support import write_extended_scenario
 
 FIXTURES = Path(__file__).parent / "fixtures" / "simulation"
@@ -340,6 +342,111 @@ def test_doctor_fails_for_a_stale_measurement_marker(
     assert exit_code == 1
     assert report["status"] == "failed"
     assert any(item["check_id"] == "measurement-marker" for item in report["checks"])
+
+
+def test_otel_summary_uses_the_public_cli(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        "robotics_acceptance_harness.cli.load_otlp_json_metrics",
+        lambda _path: (
+            SimpleNamespace(name="robotics.clock.offset"),
+            SimpleNamespace(name="robotics.clock.offset"),
+        ),
+    )
+
+    exit_code = main(["otel-summary", "--otel-metrics", "metrics.jsonl"])
+
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "sample_count": 2,
+        "instruments": {"robotics.clock.offset": 2},
+    }
+
+
+def test_timing_check_exposes_policy_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    observation = HardwareTimingObservation(
+        sync_protocol="ptp",
+        source="pmc",
+        measured_at=datetime(2026, 8, 17, tzinfo=UTC),
+        sample_count=4,
+        offset_ms=0.5,
+        jitter_ms=0.1,
+        drift_ppm=1,
+        max_sample_age_ms=2,
+        monotonic=True,
+        within_policy=False,
+    )
+    metrics_path = tmp_path / "metrics.jsonl"
+    metrics_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        "robotics_acceptance_harness.cli.load_document",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            data={"time_policy": {}, "scenario_id": "org.example.timing"},
+            sha256="b" * 64,
+        ),
+    )
+    run_context: dict[str, object] = {}
+    monkeypatch.setattr(
+        "robotics_acceptance_harness.cli.load_run_context",
+        lambda path, **kwargs: run_context.update(path=path, **kwargs),
+    )
+    monkeypatch.setattr(
+        "robotics_acceptance_harness.cli.load_evidence_index",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            local_files={
+                metrics_path.resolve(): {
+                    "media_type": "application/x-ndjson",
+                    "sha256": "a" * 64,
+                }
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "robotics_acceptance_harness.cli.load_otlp_json_metrics",
+        lambda _path, **_kwargs: (),
+    )
+    monkeypatch.setattr(
+        "robotics_acceptance_harness.cli.evaluate_hardware_timing",
+        lambda _policy, _samples: observation,
+    )
+
+    exit_code = main(
+        [
+            "timing-check",
+            "--scenario",
+            "scenario.yaml",
+            "--run-context",
+            "acceptance-run.json",
+            "--run-id",
+            "run-01234567-89ab-4def-8123-456789abcdef",
+            "--domain-id",
+            "primary",
+            "--evidence-index",
+            "evidence-index.json",
+            "--otel-metrics",
+            str(metrics_path),
+            "--expect",
+            "out-of-policy",
+        ]
+    )
+
+    assert exit_code == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["within_policy"] is False
+    assert report["measured_at"] == "2026-08-17T00:00:00Z"
+    assert run_context == {
+        "path": "acceptance-run.json",
+        "run_id": "run-01234567-89ab-4def-8123-456789abcdef",
+        "domain_id": "primary",
+        "scenario_id": "org.example.timing",
+        "scenario_sha256": "b" * 64,
+    }
 
 
 def test_evaluate_forwards_offline_window(

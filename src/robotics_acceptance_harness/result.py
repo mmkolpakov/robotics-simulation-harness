@@ -9,7 +9,7 @@ from tempfile import mkstemp
 from typing import Any
 
 from junitparser import Error, Failure, JUnitXml, Skipped, TestCase, TestSuite
-from robotics_runtime_contracts import validate_document
+from robotics_runtime_contracts import validate_document, worst_status
 
 from robotics_acceptance_harness.documents import DocumentBundle
 from robotics_acceptance_harness.evidence import VerifiedEvidence
@@ -17,7 +17,6 @@ from robotics_acceptance_harness.forbidden_graph import ForbiddenGraphObservatio
 from robotics_acceptance_harness.hardware_timing import HardwareTimingObservation
 from robotics_acceptance_harness.metrics import AssertionEvaluation
 from robotics_acceptance_harness.readiness import GraphSnapshot, ReadinessResult
-from robotics_acceptance_harness.status import worst_status
 from robotics_acceptance_harness.time_authority import TimeAuthorityObservation
 from robotics_acceptance_harness.timing import TimingObservation
 
@@ -36,6 +35,24 @@ def _workload_result(runtime: Mapping[str, Any]) -> dict[str, Any]:
         "actual_provider": workload["inference"]["actual_provider"],
         "model_format": workload["model"]["format"],
         "fallback_count": workload["inference"]["fallback_count"],
+    }
+
+
+def _runtime_observation(runtime: Mapping[str, Any]) -> dict[str, Any]:
+    data_plane = runtime["data_plane"]
+    security = runtime["security"]
+    return {
+        "execution_subject_digest": runtime["execution_subject"]["digest"],
+        "ros_domain_id": runtime["ros"]["domain_id"],
+        "rmw_implementation": runtime["ros"]["rmw_implementation"],
+        "rmw_version": runtime["ros"]["rmw_version"],
+        **(
+            {"middleware_configuration_sha256": data_plane["middleware_configuration_sha256"]}
+            if "middleware_configuration_sha256" in data_plane
+            else {}
+        ),
+        "security_enabled": security["profile"] != "none",
+        "security_strategy": security["strategy"],
     }
 
 
@@ -176,7 +193,11 @@ def build_acceptance_result(
         for evaluation in assertions
         if evaluation.status == "skipped"
     )
-    result_status = worst_status({evaluation.status for evaluation in assertions})
+    if assertions:
+        result_status = worst_status({evaluation.status for evaluation in assertions})
+    else:
+        result_status = "incomplete"
+        effective_unevaluated.add("$.assertions")
     if result_status == "skipped" or (
         result_status == "passed"
         and any(evaluation.status == "skipped" for evaluation in assertions)
@@ -194,7 +215,7 @@ def build_acceptance_result(
         result_status = "incomplete"
 
     result: dict[str, Any] = {
-        "schema_version": "acceptance-result.v5",
+        "schema_version": "acceptance-result.v1",
         "result_id": result_id,
         "run_id": run_id,
         "scenario_id": bundle.scenario.data["scenario_id"],
@@ -228,6 +249,8 @@ def build_acceptance_result(
         "observed_ros_graph": _observed_graph(readiness),
         "forbidden_graph_observation": _forbidden_graph_result(forbidden_graph),
         "execution": dict(bundle.runtime.data["execution"]),
+        "runtime_observation": _runtime_observation(bundle.runtime.data),
+        "evaluators": [dict(item) for item in bundle.scenario.data["evaluator_requirements"]],
         "workload": _workload_result(bundle.runtime.data),
         "authorization": _authorization_result(bundle),
         "lifecycle_states": _lifecycle_states(readiness.snapshot),

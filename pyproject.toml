@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "robotics-acceptance-harness"
-version = "0.17.1"
+version = "0.18.0"
 description = "Attach-only acceptance observer for validated robotics executions."
 requires-python = ">=3.12,<3.14"
 readme = "README.md"
@@ -23,12 +23,13 @@ classifiers = [
 dependencies = [
   "junitparser>=5.0.1,<6",
   "opentelemetry-proto==1.43.0",
+  "packaging>=24,<27",
   "pyyaml>=6.0.3,<7",
-  "robotics-runtime-contracts>=0.15,<0.16",
+  "robotics-runtime-contracts>=0.16,<0.17",
 ]
 
 [tool.uv.sources]
-robotics-runtime-contracts = { path = "../robotics-runtime-contracts", editable = true }
+robotics-runtime-contracts = { git = "https://github.com/mmkolpakov/robotics-runtime-contracts.git", rev = "6c6b72a90eda7540bdc84992fd7b26acd78ea8fe" }
 
 [project.optional-dependencies]
 pytest = ["pytest>=8,<10"]
