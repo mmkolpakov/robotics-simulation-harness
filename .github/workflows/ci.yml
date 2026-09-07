@@ -19,6 +19,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  live-ros:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+          path: robotics-acceptance-harness
+      - name: Build isolated ROS 2 Jazzy test environment
+        run: docker build --file tests/live/Dockerfile --tag harness-live:ci .
+      - name: Run real ROS observer and CLI integration tests
+        run: |
+          mkdir -p artifacts/live
+          docker run --rm \
+            --mount "type=bind,source=${PWD}/artifacts/live,target=/harness/artifacts/live" \
+            harness-live:ci
+      - name: Upload live results and Collector OTLP golden output
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: harness-live-jazzy-${{ github.sha }}
+          path: robotics-acceptance-harness/artifacts/live/
+          if-no-files-found: warn
+          retention-days: 7
+
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 15

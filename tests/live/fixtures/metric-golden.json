@@ -1,0 +1,9 @@
+{
+  "name": "org.example.live.value",
+  "unit": "1",
+  "value": 42.0,
+  "resource_attributes": {
+    "service.name": "harness-live-fixture",
+    "fixture.origin": "controlled-test-input"
+  }
+}
