@@ -201,7 +201,12 @@ class RosGraphObserver:
             profile_name = str(expected.get("qos_profile", "system_default"))
             self._subscribe(topic, message_type, self._qos_profile(profile_name))
         if observe_clock and "/clock" not in self._own_subscription_counts:
-            self._subscribe("/clock", self._clock_type, self._qos.qos_profile_clock)
+            clock_qos = self._qos.QoSProfile(
+                depth=1,
+                reliability=self._qos.ReliabilityPolicy.BEST_EFFORT,
+                durability=self._qos.DurabilityPolicy.VOLATILE,
+            )
+            self._subscribe("/clock", self._clock_type, clock_qos)
 
     def _configure_lifecycle(self) -> None:
         for expected in self._expected_graph["lifecycle_nodes"]:

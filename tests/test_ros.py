@@ -37,6 +37,7 @@ class FakeClient:
 class FakeNode:
     def __init__(self) -> None:
         self.callbacks: dict[str, Callable[[object], None]] = {}
+        self.subscription_qos: dict[str, object] = {}
         self.destroyed = False
         self.executor_started = Event()
         self.executor_stopped = Event()
@@ -47,9 +48,10 @@ class FakeNode:
         _message_type: object,
         topic: str,
         callback: Callable[[object], None],
-        _qos: object,
+        qos: object,
     ) -> object:
         self.callbacks[topic] = callback
+        self.subscription_qos[topic] = qos
         return object()
 
     def create_client(self, _service_type: object, _name: str) -> FakeClient:
@@ -205,7 +207,9 @@ def fake_modules(node: FakeNode) -> dict[str, object]:
             qos_profile_sensor_data="sensor-data",
             qos_profile_services_default="services-default",
             qos_profile_parameters="parameters",
-            qos_profile_clock="clock",
+            QoSProfile=SimpleNamespace,
+            ReliabilityPolicy=SimpleNamespace(BEST_EFFORT="best-effort"),
+            DurabilityPolicy=SimpleNamespace(VOLATILE="volatile"),
             QoSCompatibility=SimpleNamespace(ERROR="error"),
             qos_check_compatible=lambda *_args: ("ok", ""),
         ),
@@ -237,6 +241,9 @@ def test_ros_observer_reports_graph_clock_and_lifecycle_without_writing() -> Non
     )
 
     assert node.executor_started.wait(timeout=1.0)
+    assert node.subscription_qos["/clock"] == SimpleNamespace(
+        depth=1, reliability="best-effort", durability="volatile"
+    )
     assert observer.clock_samples == ()
     observer.start_clock_observation()
     node.callbacks["/clock"](SimpleNamespace(clock=SimpleNamespace(sec=1, nanosec=2)))
