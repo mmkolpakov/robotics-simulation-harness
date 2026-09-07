@@ -9,6 +9,32 @@ from robotics_acceptance_harness.metrics import HistogramSample, MetricSample
 from robotics_acceptance_harness.otel import MetricInputError, load_otlp_json_metrics
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '{"unknownField": true}',
+        '{"resourceMetrics": "invalid"}',
+        "null",
+        "42",
+        "[]",
+        '""',
+        "false",
+        '{"resourceMetrics": [[]]}',
+        '{"resource_metrics": [{"resource": ""}]}',
+        '{"resourceMetrics": [{"scopeMetrics": [{"metrics": [[]]}]}]}',
+        '{"resourceMetrics": [}',
+    ],
+)
+def test_rejects_malformed_otlp_with_source_line(tmp_path: Path, payload: str) -> None:
+    path = tmp_path / "invalid.jsonl"
+    path.write_text("{}\n" + payload + "\n", encoding="utf-8")
+
+    with pytest.raises(MetricInputError, match=r"invalid\.jsonl:2:") as caught:
+        load_otlp_json_metrics(path)
+
+    assert caught.value.__cause__ is not None
+
+
 def test_loads_standard_otlp_json_number_points(tmp_path: Path) -> None:
     payload = {
         "resourceMetrics": [

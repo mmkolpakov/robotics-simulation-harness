@@ -4,9 +4,11 @@ import json
 from collections.abc import Sequence
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from google.protobuf.json_format import ParseDict
+from google.protobuf.descriptor import Descriptor
+from google.protobuf.json_format import ParseDict, ParseError
+from google.protobuf.message import Message
 from opentelemetry.proto.collector.metrics.v1.metrics_service_pb2 import (
     ExportMetricsServiceRequest,
 )
@@ -24,6 +26,38 @@ OTLP_JSON_LINES_MEDIA_TYPE = "application/x-ndjson"
 
 class MetricInputError(ValueError):
     """Raised when an OTLP JSON file cannot be interpreted as metric samples."""
+
+
+def _require_message_objects(value: object, descriptor: Descriptor, path: str) -> dict[str, Any]:
+    """Reject non-object messages that ParseDict can silently treat as empty."""
+    if not isinstance(value, dict):
+        raise TypeError(f"{path}: OTLP message must be a JSON object")
+    fields = {field.json_name: field for field in descriptor.fields}
+    fields.update(descriptor.fields_by_name)
+    for name, item in value.items():
+        field = fields.get(name)
+        if field is None or item is None or field.message_type is None:
+            continue  # ParseDict handles unknown fields, scalars and field-level nulls.
+        field_path = f"{path}.{name}"
+        repeated = (
+            field.is_repeated
+            if hasattr(field, "is_repeated")
+            else cast(Any, field).label == field.LABEL_REPEATED
+        )
+        if repeated:
+            if isinstance(item, list):
+                for index, child in enumerate(item):
+                    _require_message_objects(child, field.message_type, f"{field_path}[{index}]")
+        else:
+            _require_message_objects(item, field.message_type, field_path)
+    return value
+
+
+def parse_otlp_request[RequestT: Message](payload: object, request: RequestT) -> RequestT:
+    """Parse an OTLP request using protobuf, with strict message object shapes."""
+    # Native and pure-Python descriptors expose the same reflection API.
+    document = _require_message_objects(payload, cast(Descriptor, request.DESCRIPTOR), "$")
+    return ParseDict(document, request)
 
 
 def read_otlp_json_lines(
@@ -115,8 +149,8 @@ def load_otlp_json_metrics(
             continue
         try:
             payload = json.loads(line)
-            request = ParseDict(payload, ExportMetricsServiceRequest())
-        except (json.JSONDecodeError, ValueError) as error:
+            request = parse_otlp_request(payload, ExportMetricsServiceRequest())
+        except (ParseError, TypeError, ValueError) as error:
             raise MetricInputError(
                 f"invalid OTLP JSON at {source}:{line_number}: {error}"
             ) from error

@@ -18,6 +18,32 @@ from robotics_acceptance_harness.traces import (
 SECOND_NS = 1_000_000_000
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '{"unknownField": true}',
+        '{"resourceSpans": "invalid"}',
+        "null",
+        "42",
+        "[]",
+        '""',
+        "false",
+        '{"resourceSpans": [[]]}',
+        '{"resource_spans": [{"resource": ""}]}',
+        '{"resourceSpans": [{"scopeSpans": [{"spans": [[]]}]}]}',
+        '{"resourceSpans": [}',
+    ],
+)
+def test_rejects_malformed_otlp_with_source_line(tmp_path: Path, payload: str) -> None:
+    path = tmp_path / "invalid.jsonl"
+    path.write_text("{}\n" + payload + "\n", encoding="utf-8")
+
+    with pytest.raises(TraceInputError, match=r"invalid\.jsonl:2:") as caught:
+        load_otlp_json_traces(path, expected_run_id="run", expected_domain_id="domain")
+
+    assert caught.value.__cause__ is not None
+
+
 def channel_contract(**delivery_overrides: object) -> dict[str, Any]:
     delivery: dict[str, object] = {
         "observation_window_sec": 1,
