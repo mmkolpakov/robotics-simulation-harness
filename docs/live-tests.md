@@ -90,6 +90,13 @@ The image uses the official `ros:jazzy-ros-base` image pinned by digest.
 apt-installed Python bindings. Python dependencies come from the existing lock.
 The image runs the installed package and does not copy the host's virtualenv.
 
+The live entrypoint sets `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`. The system packages
+needed for `rclpy` also expose ROS pytest plugins; Jazzy's `launch_testing` uses
+the removed `pytest_pycollect_makemodule(path, parent)` hook argument and fails
+under pytest 9 before test collection. Only automatic entry-point plugin loading
+is disabled. Built-in pytest plugins and the explicit repository `conftest.py`
+plugins still load, while real ROS bindings and the Collector remain available.
+
 The container uses ROS domain 121 and localhost discovery. Run the tests serially
 in an isolated domain; another `/clock` publisher would invalidate the fixture.
 On an existing Jazzy host with the same dependencies and a Collector binary on
@@ -97,6 +104,7 @@ On an existing Jazzy host with the same dependencies and a Collector binary on
 
 ```bash
 ROBOTICS_LIVE_ROS=1 ROS_DOMAIN_ID=121 \
+  PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
   RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
   ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST \
   python -m pytest tests/live -m live_ros -ra
