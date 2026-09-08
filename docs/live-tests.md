@@ -65,6 +65,8 @@ From the repository root, with Docker ready:
 docker build --file tests/live/Dockerfile --tag harness-live:step2 .
 mkdir -p artifacts/live
 docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  --env HOME=/tmp \
   --mount "type=bind,source=${PWD}/artifacts/live,target=/harness/artifacts/live" \
   harness-live:step2
 ```
@@ -82,6 +84,11 @@ docker run --rm `
 Use an empty output directory for each run. CLI output, result JSON, evidence
 index, Collector configuration/version/log, golden OTLP capture, and test JUnit
 remain under `artifacts/live/`. CI uploads them even when a test fails.
+
+On Linux, CI runs the container with the runner's UID/GID so the uploader can
+read owner-only result files from the bind mount. `HOME=/tmp` gives ROS a writable
+log directory, and the live entrypoint places pytest's cache in the artifact
+directory. The harness's result file permissions are preserved.
 
 The image uses the official `ros:jazzy-ros-base` image pinned by digest.
 `osrf/ros:jazzy-ros-base` in SPEC step 2 does not exist on Docker Hub (checked

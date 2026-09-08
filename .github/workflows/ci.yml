@@ -33,6 +33,8 @@ jobs:
         run: |
           mkdir -p artifacts/live
           docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --env HOME=/tmp \
             --mount "type=bind,source=${PWD}/artifacts/live,target=/harness/artifacts/live" \
             harness-live:ci
       - name: Upload live results and Collector OTLP golden output
