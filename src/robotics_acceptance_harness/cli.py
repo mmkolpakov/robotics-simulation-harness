@@ -165,7 +165,6 @@ def _parser() -> argparse.ArgumentParser:
         help="Atomically create a marker after the measurement window closes.",
     )
     verify.add_argument("--output", required=True, metavar="DIR")
-    verify.add_argument("--diagnostic-output", metavar="PATH")
 
     evaluate = subparsers.add_parser(
         "evaluate",
@@ -181,7 +180,6 @@ def _parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--window-start-ns", required=True, type=int)
     evaluate.add_argument("--window-end-ns", required=True, type=int)
     evaluate.add_argument("--output", required=True, metavar="DIR")
-    evaluate.add_argument("--diagnostic-output", metavar="PATH")
 
     aggregate = subparsers.add_parser(
         "aggregate",
@@ -271,6 +269,25 @@ def _parser() -> argparse.ArgumentParser:
         help="Summarize normalized OTLP metric points without evaluating them.",
     )
     otel_summary.add_argument("--otel-metrics", required=True, metavar="PATH")
+
+    for command_parser in (
+        create_run,
+        explain,
+        verify,
+        evaluate,
+        aggregate,
+        transport_evaluate,
+        campaign,
+        doctor,
+        why,
+        timing,
+        otel_summary,
+    ):
+        command_parser.add_argument(
+            "--diagnostic-output",
+            metavar="PATH",
+            help="Write a machine-readable diagnostic if execution fails.",
+        )
 
     return parser
 
@@ -536,15 +553,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         )
         return 0 if outputs.result["status"] == "passed" else 1
-    except (OSError, RuntimeError, ValueError) as error:
+    except Exception as error:
+        error_id = getattr(error, "error_id", None)
+        if error_id is None:
+            error_id = (
+                f"{type(error).__name__}.failed"
+                if isinstance(error, (OSError, RuntimeError, ValueError))
+                else "internal.error"
+            )
+        print(f"error: [{error_id}] {error}", file=sys.stderr)
         diagnostic_output = getattr(arguments, "diagnostic_output", None)
         if diagnostic_output:
-            write_error_diagnostic(
-                diagnostic_output,
-                command=str(arguments.command),
-                error=error,
-            )
-        print(f"error: {error}", file=sys.stderr)
+            try:
+                write_error_diagnostic(
+                    diagnostic_output,
+                    command=str(arguments.command),
+                    error=error,
+                    error_id=error_id,
+                )
+            except Exception as diagnostic_error:
+                print(f"error: cannot write diagnostic: {diagnostic_error}", file=sys.stderr)
         return 2
 
 

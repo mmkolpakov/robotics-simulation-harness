@@ -8,13 +8,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from google.protobuf.json_format import ParseDict
+from google.protobuf.json_format import ParseError
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
     ExportTraceServiceRequest,
 )
 from robotics_runtime_contracts import channel_observation_status, derive_channel_violations
 
-from robotics_acceptance_harness.otel import otlp_attributes, read_otlp_json_lines
+from robotics_acceptance_harness.otel import (
+    otlp_attributes,
+    parse_otlp_request,
+    read_otlp_json_lines,
+)
 
 MESSAGE_ID_ATTRIBUTE = "messaging.message.id"
 _OTLP_IDENTIFIER_LENGTHS = {
@@ -156,11 +160,11 @@ def load_otlp_json_traces(
             continue
         try:
             payload = json.loads(line)
-            request = ParseDict(
+            request = parse_otlp_request(
                 _normalize_otlp_json(payload),
                 ExportTraceServiceRequest(),
             )
-        except (json.JSONDecodeError, TypeError, ValueError) as error:
+        except (ParseError, TypeError, ValueError) as error:
             raise TraceInputError(
                 f"invalid OTLP JSON at {source}:{line_number}: {error}"
             ) from error

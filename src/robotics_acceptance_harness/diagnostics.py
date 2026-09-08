@@ -228,7 +228,9 @@ def report_markdown(report: Mapping[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def write_error_diagnostic(path: str | Path, *, command: str, error: Exception) -> Path:
+def write_error_diagnostic(
+    path: str | Path, *, command: str, error: Exception, error_id: str | None = None
+) -> Path:
     """Write a stable machine-readable diagnostic after a command failure."""
 
     destination = Path(path).expanduser().resolve()
@@ -236,7 +238,8 @@ def write_error_diagnostic(path: str | Path, *, command: str, error: Exception) 
     payload = {
         "status": "error",
         "command": command,
-        "error_id": getattr(error, "error_id", f"{type(error).__name__}.failed"),
+        "error_id": error_id or getattr(error, "error_id", f"{type(error).__name__}.failed"),
+        "exception_type": type(error).__name__,
         "message": str(error),
     }
     issues = getattr(error, "issues", ())

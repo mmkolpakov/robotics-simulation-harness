@@ -365,6 +365,21 @@ def test_otel_summary_uses_the_public_cli(
     }
 
 
+def test_otel_summary_reports_invalid_protobuf_as_input_error(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = tmp_path / "bad.otlp.jsonl"
+    source.write_text('{"resourceMetrics": "invalid"}\n', encoding="utf-8")
+
+    assert main(["otel-summary", "--otel-metrics", str(source)]) == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "bad.otlp.jsonl:1:" in captured.err
+    assert "Traceback" not in captured.err
+
+
 def test_timing_check_exposes_policy_result(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

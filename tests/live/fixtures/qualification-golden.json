@@ -1,0 +1,12 @@
+{
+  "interval_ns": 10000000,
+  "histogram_count": 3,
+  "message_age_ms": 1.0,
+  "delivery_latency_ms": 0.1,
+  "explicit_bounds_ms": [0.5, 2.0, 5.0],
+  "counters": {
+    "robotics.message.received": 3,
+    "robotics.message.lost": 0,
+    "robotics.message.sequence_error": 0
+  }
+}
